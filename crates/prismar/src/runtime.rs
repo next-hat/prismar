@@ -66,6 +66,12 @@ pub enum RuntimeError {
   Join(String),
   #[error("diesel query failed: {0}")]
   Query(String),
+  #[error("record was not found: {0}")]
+  NotFound(String),
+  #[error("query expected a unique record but matched multiple rows: {0}")]
+  NonUniqueResult(String),
+  #[error("unable to resolve record identity after write: {0}")]
+  IdentityResolution(String),
 }
 
 impl PrismaClient {
@@ -129,13 +135,59 @@ impl PrismaClient {
     }
   }
 
-  pub async fn create<D>(&self, data: D) -> Result<usize, RuntimeError>
+  pub async fn create<D>(&self, data: D) -> Result<D::Model, RuntimeError>
   where
     D: crate::PrismaCreateData,
   {
     let mut data = data;
     data.apply_defaults();
-    <D::Model as crate::PrismaModel>::create(self, data).await
+    let id = <D::Model as crate::PrismaModel>::id_from_create(&data)
+      .ok_or_else(|| {
+        RuntimeError::IdentityResolution(format!(
+          "{} create requires the primary key to be present in create data",
+          std::any::type_name::<D::Model>()
+        ))
+      })?;
+    <D::Model as crate::PrismaModel>::create(self, data).await?;
+    <D::Model as crate::PrismaModel>::find_by_id(self, &id)
+      .await?
+      .ok_or_else(|| {
+        RuntimeError::NotFound(format!(
+          "created {} record could not be reloaded",
+          std::any::type_name::<D::Model>()
+        ))
+      })
+  }
+
+  pub async fn create_many<D>(
+    &self,
+    data: Vec<D>,
+    _skip_duplicates: Option<bool>,
+  ) -> Result<crate::BatchPayload, RuntimeError>
+  where
+    D: crate::PrismaCreateData,
+  {
+    let mut count = 0usize;
+    for item in data {
+      self.create(item).await?;
+      count += 1;
+    }
+    Ok(crate::BatchPayload { count })
+  }
+
+  pub async fn create_many_and_return<D>(
+    &self,
+    data: Vec<D>,
+    _skip_duplicates: Option<bool>,
+  ) -> Result<Vec<D::Model>, RuntimeError>
+  where
+    D: crate::PrismaCreateData,
+  {
+    let mut out = Vec::new();
+    for item in data {
+      out.push(self.create(item).await?);
+    }
+    Ok(out)
   }
 
   pub async fn find_many<M>(
@@ -153,6 +205,45 @@ impl PrismaClient {
     M: crate::PrismaModel,
   {
     self.find_many::<M>(None).await
+  }
+
+  pub async fn find_unique<M, F>(
+    &self,
+    filter: F,
+  ) -> Result<Option<M>, RuntimeError>
+  where
+    M: crate::PrismaModel,
+    F: crate::TypedFilter,
+  {
+    let mut rows = self
+      .find_many::<M>(Some(filter.into_model_filter()))
+      .await?;
+    if rows.len() > 1 {
+      return Err(RuntimeError::NonUniqueResult(
+        std::any::type_name::<M>().to_owned(),
+      ));
+    }
+    Ok(rows.pop())
+  }
+
+  pub async fn find_first<M>(
+    &self,
+    filter: Option<crate::ModelFilter>,
+  ) -> Result<Option<M>, RuntimeError>
+  where
+    M: crate::PrismaModel,
+  {
+    Ok(self.find_many::<M>(filter).await?.into_iter().next())
+  }
+
+  pub async fn count<M>(
+    &self,
+    filter: Option<crate::ModelFilter>,
+  ) -> Result<usize, RuntimeError>
+  where
+    M: crate::PrismaModel,
+  {
+    Ok(self.find_many::<M>(filter).await?.len())
   }
 
   pub async fn find_by_id<M>(
@@ -187,22 +278,107 @@ impl PrismaClient {
     &self,
     filter: F,
     data: M::Update,
-  ) -> Result<usize, RuntimeError>
+  ) -> Result<M, RuntimeError>
   where
     M: crate::PrismaModel,
     F: crate::TypedFilter,
   {
-    let id = M::id_from_filter(filter.into_model_filter())?;
-    M::update_by_id(self, &id, data).await
+    let current = self.find_unique::<M, _>(filter).await?.ok_or_else(|| {
+      RuntimeError::NotFound(std::any::type_name::<M>().to_owned())
+    })?;
+    let id = current.id();
+    M::update_by_id(self, &id, data).await?;
+    M::find_by_id(self, &id).await?.ok_or_else(|| {
+      RuntimeError::NotFound(std::any::type_name::<M>().to_owned())
+    })
   }
 
-  pub async fn delete<M, F>(&self, filter: F) -> Result<usize, RuntimeError>
+  pub async fn update_many<M>(
+    &self,
+    filter: Option<crate::ModelFilter>,
+    data: M::Update,
+  ) -> Result<crate::BatchPayload, RuntimeError>
+  where
+    M: crate::PrismaModel,
+  {
+    let rows = self.find_many::<M>(filter).await?;
+    let mut count = 0usize;
+    for row in rows {
+      M::update_by_id(self, &row.id(), data.clone()).await?;
+      count += 1;
+    }
+    Ok(crate::BatchPayload { count })
+  }
+
+  pub async fn update_many_and_return<M>(
+    &self,
+    filter: Option<crate::ModelFilter>,
+    data: M::Update,
+  ) -> Result<Vec<M>, RuntimeError>
+  where
+    M: crate::PrismaModel,
+  {
+    let rows = self.find_many::<M>(filter).await?;
+    let mut out = Vec::new();
+    for row in rows {
+      let id = row.id();
+      M::update_by_id(self, &id, data.clone()).await?;
+      if let Some(updated) = M::find_by_id(self, &id).await? {
+        out.push(updated);
+      }
+    }
+    Ok(out)
+  }
+
+  pub async fn upsert<M, F>(
+    &self,
+    filter: F,
+    create: M::Create,
+    update: M::Update,
+  ) -> Result<M, RuntimeError>
   where
     M: crate::PrismaModel,
     F: crate::TypedFilter,
   {
-    let id = M::id_from_filter(filter.into_model_filter())?;
-    M::delete_by_id(self, &id).await
+    if let Some(current) =
+      self.find_unique::<M, _>(filter.into_model_filter()).await?
+    {
+      let id = current.id();
+      M::update_by_id(self, &id, update).await?;
+      return M::find_by_id(self, &id).await?.ok_or_else(|| {
+        RuntimeError::NotFound(std::any::type_name::<M>().to_owned())
+      });
+    }
+    self.create(create).await
+  }
+
+  pub async fn delete<M, F>(&self, filter: F) -> Result<M, RuntimeError>
+  where
+    M: crate::PrismaModel,
+    F: crate::TypedFilter,
+  {
+    let current = self.find_unique::<M, _>(filter).await?.ok_or_else(|| {
+      RuntimeError::NotFound(std::any::type_name::<M>().to_owned())
+    })?;
+    let id = current.id();
+    M::delete_by_id(self, &id).await?;
+    Ok(current)
+  }
+
+  pub async fn delete_many<M>(
+    &self,
+    filter: Option<crate::ModelFilter>,
+  ) -> Result<crate::BatchPayload, RuntimeError>
+  where
+    M: crate::PrismaModel,
+  {
+    let rows = self.find_many::<M>(filter).await?;
+    let mut count = 0usize;
+    for row in rows {
+      M::delete_by_id(self, &row.id()).await?;
+      count += 1;
+    }
+    Ok(crate::BatchPayload { count })
   }
 
   #[cfg(feature = "sqlite")]

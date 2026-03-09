@@ -61,6 +61,10 @@ impl prismar::PrismaModel for CargoDb {
 
   fn primary_key_field() -> &'static str { "key" }
 
+  fn id(&self) -> Self::Id {
+    self.key.clone()
+  }
+
   fn id_from_filter(filter: prismar::ModelFilter) -> Result<Self::Id, prismar::RuntimeError> {
     let expected = "key";
     if filter.conditions.len() != 1 {
@@ -78,8 +82,56 @@ impl prismar::PrismaModel for CargoDb {
     }
   }
 
+  fn id_from_create(data: &Self::Create) -> Option<Self::Id> {
+    data.key.clone()
+  }
+
+  fn matches_filter(&self, filter: &prismar::ModelFilter) -> Result<bool, prismar::RuntimeError> {
+    for condition in &filter.conditions {
+      let matched = match condition {
+        prismar::Condition::Predicate(predicate) => match predicate.field.as_str() {
+          "key" => prismar::evaluate_string_field(Some(self.key.as_str()), &predicate.filter),
+          "created_at" => prismar::evaluate_datetime_field(Some(self.created_at), &predicate.filter),
+          "name" => prismar::evaluate_string_field(Some(self.name.as_str()), &predicate.filter),
+          "spec_key" => prismar::evaluate_string_field(Some(self.spec_key.as_str()), &predicate.filter),
+          "status_key" => prismar::evaluate_string_field(Some(self.status_key.as_str()), &predicate.filter),
+          "namespace_name" => prismar::evaluate_string_field(Some(self.namespace_name.as_str()), &predicate.filter),
+          unknown => Err(prismar::RuntimeError::InvalidFilter(format!("unknown field '{}'", unknown))),
+        }?,
+        prismar::Condition::And(filters) => {
+          let mut all_match = true;
+          for inner in filters {
+            if !self.matches_filter(inner)? {
+              all_match = false;
+              break;
+            }
+          }
+          all_match
+        }
+        prismar::Condition::Or(filters) => {
+          let mut any_match = false;
+          for inner in filters {
+            if self.matches_filter(inner)? {
+              any_match = true;
+              break;
+            }
+          }
+          any_match
+        }
+        prismar::Condition::Not(inner) => !self.matches_filter(inner)?,
+        prismar::Condition::Relation(_) => {
+          return Err(prismar::RuntimeError::InvalidFilter("relation filters are not executable yet".to_owned()));
+        }
+      };
+      if !matched {
+        return Ok(false);
+      }
+    }
+    Ok(true)
+  }
+
   async fn create(client: &prismar::PrismaClient, data: Self::Create) -> Result<usize, prismar::RuntimeError> {
-    match client.provider() {
+match client.provider() {
       prismar::Provider::Sqlite => {
         #[cfg(feature = "sqlite")] {
       client.run_sqlite(move |conn| { diesel::insert_into(super::schema::cargoes::table).values(&data).execute(conn) }).await
@@ -98,15 +150,10 @@ impl prismar::PrismaModel for CargoDb {
         }
         #[cfg(not(feature = "mysql"))] { Err(prismar::RuntimeError::UnsupportedProvider("mysql")) }
       }
-    }
-  }
+    }  }
 
   async fn find_many(client: &prismar::PrismaClient, filter: Option<prismar::ModelFilter>) -> Result<Vec<Self>, prismar::RuntimeError> {
-    if let Some(filter) = filter {
-      let id = Self::id_from_filter(filter)?;
-      return Ok(Self::find_by_id(client, &id).await?.into_iter().collect());
-    }
-    match client.provider() {
+    let rows = match client.provider() {
       prismar::Provider::Sqlite => {
         #[cfg(feature = "sqlite")] {
       client.run_sqlite(|conn| { super::schema::cargoes::table.select(Self::as_select()).load::<Self>(conn) }).await
@@ -125,12 +172,23 @@ impl prismar::PrismaModel for CargoDb {
         }
         #[cfg(not(feature = "mysql"))] { Err(prismar::RuntimeError::UnsupportedProvider("mysql")) }
       }
+    };
+    let mut rows = rows?;
+    if let Some(filter) = filter {
+      let mut filtered = Vec::new();
+      for row in rows.drain(..) {
+        if row.matches_filter(&filter)? {
+          filtered.push(row);
+        }
+      }
+      return Ok(filtered);
     }
+    Ok(rows)
   }
 
   async fn find_by_id(client: &prismar::PrismaClient, id: &Self::Id) -> Result<Option<Self>, prismar::RuntimeError> {
     let id = id.clone();
-    match client.provider() {
+match client.provider() {
       prismar::Provider::Sqlite => {
         #[cfg(feature = "sqlite")] {
       client.run_sqlite(move |conn| { super::schema::cargoes::table.find(id).select(Self::as_select()).first::<Self>(conn).optional() }).await
@@ -149,12 +207,11 @@ impl prismar::PrismaModel for CargoDb {
         }
         #[cfg(not(feature = "mysql"))] { Err(prismar::RuntimeError::UnsupportedProvider("mysql")) }
       }
-    }
-  }
+    }  }
 
   async fn update_by_id(client: &prismar::PrismaClient, id: &Self::Id, data: Self::Update) -> Result<usize, prismar::RuntimeError> {
     let id = id.clone();
-    match client.provider() {
+match client.provider() {
       prismar::Provider::Sqlite => {
         #[cfg(feature = "sqlite")] {
       client.run_sqlite(move |conn| { diesel::update(super::schema::cargoes::table.find(id)).set(&data).execute(conn) }).await
@@ -173,12 +230,11 @@ impl prismar::PrismaModel for CargoDb {
         }
         #[cfg(not(feature = "mysql"))] { Err(prismar::RuntimeError::UnsupportedProvider("mysql")) }
       }
-    }
-  }
+    }  }
 
   async fn delete_by_id(client: &prismar::PrismaClient, id: &Self::Id) -> Result<usize, prismar::RuntimeError> {
     let id = id.clone();
-    match client.provider() {
+match client.provider() {
       prismar::Provider::Sqlite => {
         #[cfg(feature = "sqlite")] {
       client.run_sqlite(move |conn| { diesel::delete(super::schema::cargoes::table.find(id)).execute(conn) }).await
@@ -197,6 +253,5 @@ impl prismar::PrismaModel for CargoDb {
         }
         #[cfg(not(feature = "mysql"))] { Err(prismar::RuntimeError::UnsupportedProvider("mysql")) }
       }
-    }
-  }
+    }  }
 }

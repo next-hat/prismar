@@ -62,13 +62,13 @@ mod generated;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let client = PrismaClient::new(Provider::Sqlite, "sqlite://./dev.db")?;
 
-  client
+  let namespace = client
     .create(NamespaceCreate {
       name: Some("system".to_owned()),
     })
     .await?;
 
-  client
+  let created = client
     .create(CargoCreate {
       key: Some("cargo.system.api".to_owned()),
       created_at: Some(chrono::Utc::now().naive_utc()),
@@ -80,20 +80,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
 
   let all_cargos = client.find_many::<CargoDb>(None).await?;
-  let cargo_id = "cargo.system.api".to_owned();
-  let cargo = client.find_by_id::<CargoDb>(&cargo_id).await?;
-
   let filtered = client
-    .find_many::<CargoDb>(Some(
-      CargoDbFilter::new()
-        .key(StringFilter::Equals("cargo.system.api".to_owned()))
-        .into(),
-    ))
+    .find_unique::<CargoDb, _>(
+      CargoDbFilter::new().key(StringFilter::Equals("cargo.system.api".to_owned())),
+    )
     .await?;
 
-  client
-    .update_by_id::<CargoUpdate>(
-      &cargo_id,
+  let updated = client
+    .update::<CargoDb, _>(
+      CargoDbFilter::new().key(StringFilter::Equals("cargo.system.api".to_owned())),
       CargoUpdate {
         status_key: Some("updated".to_owned()),
         ..Default::default()
@@ -101,11 +96,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-  client.delete_by_id::<CargoDb>(&cargo_id).await?;
+  let deleted = client
+    .delete::<CargoDb, _>(
+      CargoDbFilter::new().key(StringFilter::Equals("cargo.system.api".to_owned())),
+    )
+    .await?;
 
   assert_eq!(all_cargos.len(), 1);
-  assert!(cargo.is_some());
-  assert_eq!(filtered.len(), 1);
+  assert_eq!(namespace.name, "system");
+  assert_eq!(created.key, "cargo.system.api");
+  assert!(filtered.is_some());
+  assert_eq!(updated.status_key, "updated");
+  assert_eq!(deleted.key, "cargo.system.api");
   Ok(())
 }
 ```
@@ -239,7 +241,7 @@ let filter = args.where.unwrap();
 let rows = client.find_many::<CargoDb>(Some(filter)).await?;
 ```
 
-That `find_many()` example is valid today because it targets the primary key.
+That `find_many()` example is valid today and executes against the loaded model rows.
 
 Another example with logical composition:
 
@@ -296,6 +298,28 @@ let filtered = client
   .await?;
 ```
 
+### Find unique
+
+```rust
+let cargo = client
+  .find_unique::<CargoDb, _>(
+    CargoDbFilter::new().key(StringFilter::Equals("cargo.system.api".to_owned())),
+  )
+  .await?;
+```
+
+### Find first
+
+```rust
+let first = client
+  .find_first::<CargoDb>(Some(
+    CargoDbFilter::new()
+      .status_key(StringFilter::Equals("running".to_owned()))
+      .into(),
+  ))
+  .await?;
+```
+
 ### Find one by id
 
 ```rust
@@ -322,6 +346,36 @@ client
 
 If a field has `@default(uuid())` and the Rust value is `None`, Prismar fills it client-side before insert.
 
+### Create many
+
+```rust
+let batch = client
+  .create_many(
+    vec![
+      CargoCreate {
+        key: Some("cargo.system.api".to_owned()),
+        created_at: Some(chrono::Utc::now().naive_utc()),
+        name: Some("api".to_owned()),
+        spec_key: None,
+        status_key: Some("running".to_owned()),
+        namespace_name: Some("system".to_owned()),
+      },
+      CargoCreate {
+        key: Some("cargo.system.worker".to_owned()),
+        created_at: Some(chrono::Utc::now().naive_utc()),
+        name: Some("worker".to_owned()),
+        spec_key: None,
+        status_key: Some("running".to_owned()),
+        namespace_name: Some("system".to_owned()),
+      },
+    ],
+    None,
+  )
+  .await?;
+
+assert_eq!(batch.count, 2);
+```
+
 ### Update by id
 
 ```rust
@@ -345,12 +399,10 @@ let cargo_id = "cargo.system.api".to_owned();
 client.delete_by_id::<CargoDb>(&cargo_id).await?;
 ```
 
-### Generic update and delete
-
-Prismar also exposes generic `update()` and `delete()` helpers:
+### Update
 
 ```rust
-client
+let updated = client
   .update::<CargoDb, _>(
     CargoDbFilter::new().key(StringFilter::Equals("cargo.system.api".to_owned())),
     CargoUpdate {
@@ -359,17 +411,131 @@ client
     },
   )
   .await?;
+```
 
-client
+### Update many
+
+```rust
+let batch = client
+  .update_many::<CargoDb>(
+    Some(
+      CargoDbFilter::new()
+        .status_key(StringFilter::Equals("running".to_owned()))
+        .into(),
+    ),
+    CargoUpdate {
+      status_key: Some("queued".to_owned()),
+      ..Default::default()
+    },
+  )
+  .await?;
+
+assert_eq!(batch.count, 1);
+```
+
+### Update many and return
+
+```rust
+let updated = client
+  .update_many_and_return::<CargoDb>(
+    Some(
+      CargoDbFilter::new()
+        .status_key(StringFilter::Equals("queued".to_owned()))
+        .into(),
+    ),
+    CargoUpdate {
+      status_key: Some("drained".to_owned()),
+      ..Default::default()
+    },
+  )
+  .await?;
+```
+
+### Upsert
+
+```rust
+let cargo = client
+  .upsert::<CargoDb, _>(
+    CargoDbFilter::new().key(StringFilter::Equals("cargo.system.api".to_owned())),
+    CargoCreate {
+      key: Some("cargo.system.api".to_owned()),
+      created_at: Some(chrono::Utc::now().naive_utc()),
+      name: Some("api".to_owned()),
+      spec_key: None,
+      status_key: Some("running".to_owned()),
+      namespace_name: Some("system".to_owned()),
+    },
+    CargoUpdate {
+      status_key: Some("updated".to_owned()),
+      ..Default::default()
+    },
+  )
+  .await?;
+```
+
+### Delete
+
+```rust
+let deleted = client
   .delete::<CargoDb, _>(
     CargoDbFilter::new().key(StringFilter::Equals("cargo.system.api".to_owned())),
   )
   .await?;
 ```
 
-Current limitation: generic `update(filter, ...)`, `delete(filter)`, and filtered `find_many(Some(filter))` only resolve simple primary-key equality today. Full arbitrary filter execution is planned separately.
+### Delete many
 
-The richer operators shown in the JSON section are already parsed into `ModelFilter`, and can be rendered or inspected, but end-to-end execution is currently limited as noted above.
+```rust
+let batch = client
+  .delete_many::<CargoDb>(Some(
+    CargoDbFilter::new()
+      .namespace_name(StringFilter::Equals("system".to_owned()))
+      .into(),
+  ))
+  .await?;
+```
+
+### Count
+
+```rust
+let count = client
+  .count::<CargoDb>(Some(
+    CargoDbFilter::new()
+      .status_key(StringFilter::Equals("running".to_owned()))
+      .into(),
+  ))
+  .await?;
+```
+
+## Prisma-style CRUD naming
+
+Prismar now exposes Prisma-aligned CRUD entry points:
+
+- `create`
+- `create_many`
+- `create_many_and_return`
+- `find_unique`
+- `find_first`
+- `find_many`
+- `count`
+- `update`
+- `update_many`
+- `update_many_and_return`
+- `upsert`
+- `delete`
+- `delete_many`
+
+Additional convenience helpers remain available:
+
+- `find_by_id`
+- `update_by_id`
+- `delete_by_id`
+
+Current implementation notes:
+
+- scalar filters execute against loaded model rows, so Prisma-style field operators such as `contains`, `startsWith`, `gt`, `in`, `AND`, `OR`, and `NOT` work through the generated model layer
+- relation filter parsing exists, but relation-filter execution is not wired yet
+- `create()` reloads the created row via the generated primary key, so the primary key must be present or client-generated in the create payload
 
 ## Runtime helpers
 

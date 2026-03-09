@@ -391,6 +391,15 @@ pub struct DeleteByIdArgs {
   pub id: IdSelector,
 }
 
+#[derive(
+  Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
+)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct BatchPayload {
+  pub count: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
@@ -1305,19 +1314,25 @@ pub trait PrismaCreateData: Send + 'static {
   fn apply_defaults(&mut self) {}
 }
 
-pub trait PrismaUpdateData: Send + 'static {
+pub trait PrismaUpdateData: Clone + Send + 'static {
   type Model: PrismaModel<Update = Self>;
 }
 
 #[allow(async_fn_in_trait)]
 pub trait PrismaModel: Sized + Send + 'static {
-  type Create: PrismaCreateData<Model = Self>;
-  type Update: PrismaUpdateData<Model = Self>;
+  type Create: Clone + PrismaCreateData<Model = Self>;
+  type Update: Clone + PrismaUpdateData<Model = Self>;
   type Id: Clone + Send + 'static;
 
   fn primary_key_field() -> &'static str;
 
+  fn id(&self) -> Self::Id;
+
   fn id_from_filter(filter: ModelFilter) -> Result<Self::Id, RuntimeError>;
+
+  fn id_from_create(data: &Self::Create) -> Option<Self::Id>;
+
+  fn matches_filter(&self, filter: &ModelFilter) -> Result<bool, RuntimeError>;
 
   async fn create(
     client: &PrismaClient,
@@ -1344,4 +1359,260 @@ pub trait PrismaModel: Sized + Send + 'static {
     client: &PrismaClient,
     id: &Self::Id,
   ) -> Result<usize, RuntimeError>;
+}
+
+pub fn evaluate_string_field(
+  value: Option<&str>,
+  filter: &FieldFilter,
+) -> Result<bool, RuntimeError> {
+  match filter {
+    FieldFilter::Null => Ok(value.is_none()),
+    FieldFilter::NotNull => Ok(value.is_some()),
+    FieldFilter::String(filter) => {
+      let Some(value) = value else {
+        return Ok(matches!(filter, StringFilter::IsNull));
+      };
+      Ok(match filter {
+        StringFilter::Equals(expected) => value == expected,
+        StringFilter::NotEquals(expected) => value != expected,
+        StringFilter::Like(pattern) => like_matches(value, pattern),
+        StringFilter::NotLike(pattern) => !like_matches(value, pattern),
+        StringFilter::Contains(expected) => value.contains(expected),
+        StringFilter::NotContains(expected) => !value.contains(expected),
+        StringFilter::StartsWith(expected) => value.starts_with(expected),
+        StringFilter::EndsWith(expected) => value.ends_with(expected),
+        StringFilter::GreaterThan(expected) => value > expected.as_str(),
+        StringFilter::GreaterThanOrEquals(expected) => {
+          value >= expected.as_str()
+        }
+        StringFilter::LessThan(expected) => value < expected.as_str(),
+        StringFilter::LessThanOrEquals(expected) => value <= expected.as_str(),
+        StringFilter::In(values) => {
+          values.iter().any(|expected| value == expected)
+        }
+        StringFilter::NotIn(values) => {
+          values.iter().all(|expected| value != expected)
+        }
+        StringFilter::IsNull => false,
+        StringFilter::IsNotNull => true,
+      })
+    }
+    _ => Err(RuntimeError::InvalidFilter(
+      "expected string filter".to_owned(),
+    )),
+  }
+}
+
+pub fn evaluate_number_field(
+  value: Option<f64>,
+  filter: &FieldFilter,
+) -> Result<bool, RuntimeError> {
+  match filter {
+    FieldFilter::Null => Ok(value.is_none()),
+    FieldFilter::NotNull => Ok(value.is_some()),
+    FieldFilter::Number(filter) => {
+      let Some(value) = value else {
+        return Ok(matches!(filter, NumberFilter::IsNull));
+      };
+      Ok(match filter {
+        NumberFilter::Equals(expected) => value == *expected,
+        NumberFilter::NotEquals(expected) => value != *expected,
+        NumberFilter::GreaterThan(expected) => value > *expected,
+        NumberFilter::GreaterThanOrEquals(expected) => value >= *expected,
+        NumberFilter::LessThan(expected) => value < *expected,
+        NumberFilter::LessThanOrEquals(expected) => value <= *expected,
+        NumberFilter::In(values) => values.contains(&value),
+        NumberFilter::NotIn(values) => {
+          values.iter().all(|expected| value != *expected)
+        }
+        NumberFilter::IsNull => false,
+        NumberFilter::IsNotNull => true,
+      })
+    }
+    _ => Err(RuntimeError::InvalidFilter(
+      "expected number filter".to_owned(),
+    )),
+  }
+}
+
+pub fn evaluate_bool_field(
+  value: Option<bool>,
+  filter: &FieldFilter,
+) -> Result<bool, RuntimeError> {
+  match filter {
+    FieldFilter::Null => Ok(value.is_none()),
+    FieldFilter::NotNull => Ok(value.is_some()),
+    FieldFilter::Bool(filter) => {
+      let Some(value) = value else {
+        return Ok(matches!(filter, BoolFilter::IsNull));
+      };
+      Ok(match filter {
+        BoolFilter::Equals(expected) => value == *expected,
+        BoolFilter::NotEquals(expected) => value != *expected,
+        BoolFilter::In(values) => values.contains(&value),
+        BoolFilter::NotIn(values) => {
+          values.iter().all(|expected| value != *expected)
+        }
+        BoolFilter::IsNull => false,
+        BoolFilter::IsNotNull => true,
+      })
+    }
+    _ => Err(RuntimeError::InvalidFilter(
+      "expected bool filter".to_owned(),
+    )),
+  }
+}
+
+pub fn evaluate_datetime_field(
+  value: Option<NaiveDateTime>,
+  filter: &FieldFilter,
+) -> Result<bool, RuntimeError> {
+  match filter {
+    FieldFilter::Null => Ok(value.is_none()),
+    FieldFilter::NotNull => Ok(value.is_some()),
+    FieldFilter::DateTime(filter) => {
+      let Some(value) = value else {
+        return Ok(matches!(filter, DateTimeFilter::IsNull));
+      };
+      Ok(match filter {
+        DateTimeFilter::Equals(expected) => value == *expected,
+        DateTimeFilter::NotEquals(expected) => value != *expected,
+        DateTimeFilter::GreaterThan(expected) => value > *expected,
+        DateTimeFilter::GreaterThanOrEquals(expected) => value >= *expected,
+        DateTimeFilter::LessThan(expected) => value < *expected,
+        DateTimeFilter::LessThanOrEquals(expected) => value <= *expected,
+        DateTimeFilter::In(values) => values.contains(&value),
+        DateTimeFilter::NotIn(values) => {
+          values.iter().all(|expected| value != *expected)
+        }
+        DateTimeFilter::IsNull => false,
+        DateTimeFilter::IsNotNull => true,
+      })
+    }
+    _ => Err(RuntimeError::InvalidFilter(
+      "expected datetime filter".to_owned(),
+    )),
+  }
+}
+
+pub fn evaluate_json_field(
+  value: Option<&serde_json::Value>,
+  filter: &FieldFilter,
+) -> Result<bool, RuntimeError> {
+  match filter {
+    FieldFilter::Null => Ok(value.is_none()),
+    FieldFilter::NotNull => Ok(value.is_some()),
+    FieldFilter::Json(filter) => {
+      let Some(value) = value else {
+        return Ok(matches!(filter, JsonFilter::IsNull));
+      };
+      Ok(match filter {
+        JsonFilter::Equals(expected) => value == expected,
+        JsonFilter::NotEquals(expected) => value != expected,
+        JsonFilter::Contains(expected) => json_contains(value, expected),
+        JsonFilter::NotContains(expected) => !json_contains(value, expected),
+        JsonFilter::HasKey(key) => value.get(key).is_some(),
+        JsonFilter::HasAnyKey(keys) => {
+          keys.iter().any(|key| value.get(key).is_some())
+        }
+        JsonFilter::HasEveryKey(keys) => {
+          keys.iter().all(|key| value.get(key).is_some())
+        }
+        JsonFilter::PathEquals {
+          path,
+          value: expected,
+        } => json_path(value, path) == Some(expected),
+        JsonFilter::PathNotEquals {
+          path,
+          value: expected,
+        } => json_path(value, path) != Some(expected),
+        JsonFilter::PathLike {
+          path,
+          value: expected,
+        } => json_path(value, path)
+          .and_then(serde_json::Value::as_str)
+          .is_some_and(|current| like_matches(current, expected)),
+        JsonFilter::PathNotLike {
+          path,
+          value: expected,
+        } => json_path(value, path)
+          .and_then(serde_json::Value::as_str)
+          .is_some_and(|current| !like_matches(current, expected)),
+        JsonFilter::PathStartsWith {
+          path,
+          value: expected,
+        } => json_path(value, path)
+          .and_then(serde_json::Value::as_str)
+          .is_some_and(|current| current.starts_with(expected)),
+        JsonFilter::PathEndsWith {
+          path,
+          value: expected,
+        } => json_path(value, path)
+          .and_then(serde_json::Value::as_str)
+          .is_some_and(|current| current.ends_with(expected)),
+        JsonFilter::PathContains {
+          path,
+          value: expected,
+        } => json_path(value, path)
+          .is_some_and(|current| json_contains(current, expected)),
+        JsonFilter::IsNull => false,
+        JsonFilter::IsNotNull => true,
+      })
+    }
+    _ => Err(RuntimeError::InvalidFilter(
+      "expected json filter".to_owned(),
+    )),
+  }
+}
+
+fn like_matches(value: &str, pattern: &str) -> bool {
+  fn inner(value: &[u8], pattern: &[u8]) -> bool {
+    match pattern.split_first() {
+      None => value.is_empty(),
+      Some((b'%', rest)) => {
+        (0..=value.len()).any(|index| inner(&value[index..], rest))
+      }
+      Some((b'_', rest)) => !value.is_empty() && inner(&value[1..], rest),
+      Some((current, rest)) => {
+        value.first() == Some(current) && inner(&value[1..], rest)
+      }
+    }
+  }
+
+  inner(value.as_bytes(), pattern.as_bytes())
+}
+
+fn json_contains(
+  current: &serde_json::Value,
+  expected: &serde_json::Value,
+) -> bool {
+  match (current, expected) {
+    (
+      serde_json::Value::Object(current),
+      serde_json::Value::Object(expected),
+    ) => expected.iter().all(|(key, expected)| {
+      current
+        .get(key)
+        .is_some_and(|value| json_contains(value, expected))
+    }),
+    (serde_json::Value::Array(current), serde_json::Value::Array(expected)) => {
+      expected.iter().all(|expected_item| {
+        current
+          .iter()
+          .any(|item| json_contains(item, expected_item))
+      })
+    }
+    _ => current == expected,
+  }
+}
+
+fn json_path<'a>(
+  value: &'a serde_json::Value,
+  path: &[String],
+) -> Option<&'a serde_json::Value> {
+  let mut current = value;
+  for segment in path {
+    current = current.get(segment)?;
+  }
+  Some(current)
 }

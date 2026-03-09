@@ -38,13 +38,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   })
   .await?;
 
-  client
+  let namespace = client
     .create(NamespaceCreate {
       name: Some("system".to_owned()),
     })
     .await?;
+  assert_eq!(namespace.name, "system");
 
-  client
+  let created = client
     .create(CargoCreate {
       key: Some("cargo.system.api".to_owned()),
       created_at: Some(
@@ -59,6 +60,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
       namespace_name: Some("system".to_owned()),
     })
     .await?;
+  assert_eq!(created.key, "cargo.system.api");
+
+  let batch = client
+    .create_many(
+      vec![CargoCreate {
+        key: Some("cargo.system.worker".to_owned()),
+        created_at: Some(
+          chrono::NaiveDate::from_ymd_opt(2026, 3, 9)
+            .unwrap()
+            .and_hms_opt(12, 5, 0)
+            .unwrap(),
+        ),
+        name: Some("worker".to_owned()),
+        spec_key: None,
+        status_key: Some("running".to_owned()),
+        namespace_name: Some("system".to_owned()),
+      }],
+      None,
+    )
+    .await?;
+  assert_eq!(batch.count, 1);
 
   let payload = fs::read_to_string(Path::new(FIXTURE_DIR).join("query.json"))?;
   let input: PrismaReadManyInput = serde_json::from_str(&payload)?;
@@ -80,6 +102,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .into(),
     ))
     .await?;
+  let unique = client
+    .find_unique::<CargoDb, _>(
+      CargoDbFilter::new().key(StringFilter::Equals("cargo.system.api".to_owned())),
+    )
+    .await?
+    .ok_or_else(|| std::io::Error::other("unique cargo not found"))?;
+  let first = client
+    .find_first::<CargoDb>(Some(
+      CargoDbFilter::new()
+        .status_key(StringFilter::Equals("running".to_owned()))
+        .into(),
+    ))
+    .await?
+    .ok_or_else(|| std::io::Error::other("first cargo not found"))?;
+  let total = client.count::<CargoDb>(None).await?;
   let cargo_id = "cargo.system.api".to_owned();
   let cargo = client
     .find_by_id::<CargoDb>(&cargo_id)
@@ -87,29 +124,96 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .ok_or_else(|| std::io::Error::other("cargo not found"))?;
 
   assert_eq!(namespaces.len(), 1);
-  assert_eq!(cargos.len(), 1);
+  assert_eq!(cargos.len(), 2);
   assert_eq!(filtered.len(), 1);
+  assert_eq!(total, 2);
+  assert_eq!(unique.key, "cargo.system.api");
+  assert_eq!(first.status_key, "running");
   assert_eq!(cargo.namespace_name, "system");
   assert_eq!(cargo.name, "api");
   assert!(!cargo.spec_key.is_empty());
 
-  client
-    .update_by_id::<CargoUpdate>(
-      &cargo_id,
+  let updated = client
+    .update::<CargoDb, _>(
+      CargoDbFilter::new().key(StringFilter::Equals(cargo_id.clone())),
       CargoUpdate {
         status_key: Some("updated".to_owned()),
         ..Default::default()
       },
     )
     .await?;
-
-  let updated = client
-    .find_by_id::<CargoDb>(&cargo_id)
-    .await?
-    .ok_or_else(|| std::io::Error::other("updated cargo not found"))?;
   assert_eq!(updated.status_key, "updated");
 
-  client.delete_by_id::<CargoDb>(&cargo_id).await?;
+  let updated_many = client
+    .update_many::<CargoDb>(
+      Some(
+        CargoDbFilter::new()
+          .status_key(StringFilter::Equals("running".to_owned()))
+          .into(),
+      ),
+      CargoUpdate {
+        status_key: Some("queued".to_owned()),
+        ..Default::default()
+      },
+    )
+    .await?;
+  assert_eq!(updated_many.count, 1);
+
+  let updated_many_rows = client
+    .update_many_and_return::<CargoDb>(
+      Some(
+        CargoDbFilter::new()
+          .status_key(StringFilter::Equals("queued".to_owned()))
+          .into(),
+      ),
+      CargoUpdate {
+        status_key: Some("drained".to_owned()),
+        ..Default::default()
+      },
+    )
+    .await?;
+  assert_eq!(updated_many_rows.len(), 1);
+  assert_eq!(updated_many_rows[0].status_key, "drained");
+
+  let upserted = client
+    .upsert::<CargoDb, _>(
+      CargoDbFilter::new().key(StringFilter::Equals("cargo.system.upsert".to_owned())),
+      CargoCreate {
+        key: Some("cargo.system.upsert".to_owned()),
+        created_at: Some(
+          chrono::NaiveDate::from_ymd_opt(2026, 3, 9)
+            .unwrap()
+            .and_hms_opt(12, 10, 0)
+            .unwrap(),
+        ),
+        name: Some("upsert".to_owned()),
+        spec_key: None,
+        status_key: Some("created".to_owned()),
+        namespace_name: Some("system".to_owned()),
+      },
+      CargoUpdate {
+        status_key: Some("updated".to_owned()),
+        ..Default::default()
+      },
+    )
+    .await?;
+  assert_eq!(upserted.key, "cargo.system.upsert");
+
+  let deleted = client
+    .delete::<CargoDb, _>(
+      CargoDbFilter::new().key(StringFilter::Equals(cargo_id.clone())),
+    )
+    .await?;
+  assert_eq!(deleted.key, cargo_id);
+
+  let deleted_many = client
+    .delete_many::<CargoDb>(Some(
+      CargoDbFilter::new()
+        .namespace_name(StringFilter::Equals("system".to_owned()))
+        .into(),
+    ))
+    .await?;
+  assert_eq!(deleted_many.count, 2);
   assert!(client.find_many::<CargoDb>(None).await?.is_empty());
 
   println!("E2E fixture passed: migrations applied and generated models queried successfully.");

@@ -634,6 +634,7 @@ fn render_model_traits(
   let create_name = format!("{}Create", model_name);
   let update_name = format!("{}Update", model_name);
   let table = table_name(model);
+  let persisted = persisted_fields(model);
 
   out.push('\n');
   out.push_str(
@@ -666,6 +667,9 @@ fn render_model_traits(
     )
     .as_str(),
   );
+  out.push_str("  fn id(&self) -> Self::Id {\n");
+  out.push_str(format!("    self.{}.clone()\n", pk_field.name).as_str());
+  out.push_str("  }\n\n");
   out.push_str("  fn id_from_filter(filter: prismar::ModelFilter) -> Result<Self::Id, prismar::RuntimeError> {\n");
   out.push_str(format!("    let expected = \"{}\";\n", pk_field.name).as_str());
   out.push_str("    if filter.conditions.len() != 1 {\n      return Err(prismar::RuntimeError::InvalidFilter(format!(\"expected a single equality predicate on {}\", expected)));\n    }\n\n");
@@ -681,6 +685,53 @@ fn render_model_traits(
   out.push_str("      }\n");
   out.push_str("      _ => Err(prismar::RuntimeError::InvalidFilter(format!(\"expected equality predicate on {}\", expected))),\n");
   out.push_str("    }\n  }\n\n");
+  out.push_str(
+    "  fn id_from_create(data: &Self::Create) -> Option<Self::Id> {\n",
+  );
+  out.push_str(format!("    {}\n", render_create_id_access(pk_field)).as_str());
+  out.push_str("  }\n\n");
+  out.push_str("  fn matches_filter(&self, filter: &prismar::ModelFilter) -> Result<bool, prismar::RuntimeError> {\n");
+  out.push_str("    for condition in &filter.conditions {\n");
+  out.push_str("      let matched = match condition {\n");
+  out.push_str("        prismar::Condition::Predicate(predicate) => match predicate.field.as_str() {\n");
+  for field in &persisted {
+    out.push_str(render_predicate_match_arm(field).as_str());
+  }
+  out.push_str("          unknown => Err(prismar::RuntimeError::InvalidFilter(format!(\"unknown field '{}'\", unknown))),\n");
+  out.push_str("        }?,\n");
+  out.push_str("        prismar::Condition::And(filters) => {\n");
+  out.push_str("          let mut all_match = true;\n");
+  out.push_str("          for inner in filters {\n");
+  out.push_str("            if !self.matches_filter(inner)? {\n");
+  out.push_str("              all_match = false;\n");
+  out.push_str("              break;\n");
+  out.push_str("            }\n");
+  out.push_str("          }\n");
+  out.push_str("          all_match\n");
+  out.push_str("        }\n");
+  out.push_str("        prismar::Condition::Or(filters) => {\n");
+  out.push_str("          let mut any_match = false;\n");
+  out.push_str("          for inner in filters {\n");
+  out.push_str("            if self.matches_filter(inner)? {\n");
+  out.push_str("              any_match = true;\n");
+  out.push_str("              break;\n");
+  out.push_str("            }\n");
+  out.push_str("          }\n");
+  out.push_str("          any_match\n");
+  out.push_str("        }\n");
+  out.push_str(
+    "        prismar::Condition::Not(inner) => !self.matches_filter(inner)?,\n",
+  );
+  out.push_str("        prismar::Condition::Relation(_) => {\n");
+  out.push_str("          return Err(prismar::RuntimeError::InvalidFilter(\"relation filters are not executable yet\".to_owned()));\n");
+  out.push_str("        }\n");
+  out.push_str("      };\n");
+  out.push_str("      if !matched {\n");
+  out.push_str("        return Ok(false);\n");
+  out.push_str("      }\n");
+  out.push_str("    }\n");
+  out.push_str("    Ok(true)\n");
+  out.push_str("  }\n\n");
 
   out.push_str(
     "  async fn create(client: &prismar::PrismaClient, data: Self::Create) -> Result<usize, prismar::RuntimeError> {\n",
@@ -695,15 +746,24 @@ fn render_model_traits(
   out.push_str(
     "  async fn find_many(client: &prismar::PrismaClient, filter: Option<prismar::ModelFilter>) -> Result<Vec<Self>, prismar::RuntimeError> {\n",
   );
-  out.push_str("    if let Some(filter) = filter {\n");
-  out.push_str("      let id = Self::id_from_filter(filter)?;\n");
-  out.push_str("      return Ok(Self::find_by_id(client, &id).await?.into_iter().collect());\n");
-  out.push_str("    }\n");
-  render_backend_dispatch(schema, out, |backend| {
+  out.push_str("    let rows = ");
+  out.push_str(backend_dispatch_expr(schema, |backend| {
     format!(
       "      client.{backend}(|conn| {{ super::schema::{table}::table.select(Self::as_select()).load::<Self>(conn) }}).await\n"
     )
-  });
+  }).as_str());
+  out.push_str(";\n");
+  out.push_str("    let mut rows = rows?;\n");
+  out.push_str("    if let Some(filter) = filter {\n");
+  out.push_str("      let mut filtered = Vec::new();\n");
+  out.push_str("      for row in rows.drain(..) {\n");
+  out.push_str("        if row.matches_filter(&filter)? {\n");
+  out.push_str("          filtered.push(row);\n");
+  out.push_str("        }\n");
+  out.push_str("      }\n");
+  out.push_str("      return Ok(filtered);\n");
+  out.push_str("    }\n");
+  out.push_str("    Ok(rows)\n");
   out.push_str("  }\n\n");
 
   out.push_str(
@@ -751,8 +811,16 @@ fn render_backend_dispatch<F>(schema: &Schema, out: &mut String, render: F)
 where
   F: Fn(&str) -> String,
 {
+  out.push_str(backend_dispatch_expr(schema, render).as_str());
+}
+
+fn backend_dispatch_expr<F>(schema: &Schema, render: F) -> String
+where
+  F: Fn(&str) -> String,
+{
   let _ = schema;
-  out.push_str("    match client.provider() {\n");
+  let mut out = String::new();
+  out.push_str("match client.provider() {\n");
   out.push_str("      prismar::Provider::Sqlite => {\n");
   out.push_str("        #[cfg(feature = \"sqlite\")] {\n");
   out.push_str(render("run_sqlite").as_str());
@@ -765,7 +833,102 @@ where
   out.push_str("        #[cfg(feature = \"mysql\")] {\n");
   out.push_str(render("run_mysql").as_str());
   out.push_str("        }\n        #[cfg(not(feature = \"mysql\"))] { Err(prismar::RuntimeError::UnsupportedProvider(\"mysql\")) }\n      }\n");
-  out.push_str("    }\n");
+  out.push_str("    }");
+  out
+}
+
+fn render_create_id_access(field: &Field) -> String {
+  let accessor = format!("data.{}.clone()", field.name);
+  match field.r#type {
+    FieldType::String
+    | FieldType::Uuid
+    | FieldType::Relation(_)
+    | FieldType::Int
+    | FieldType::BigInt
+    | FieldType::Float
+    | FieldType::Decimal
+    | FieldType::Boolean
+    | FieldType::DateTime => accessor,
+    FieldType::Json | FieldType::Bytes => "None".to_owned(),
+  }
+}
+
+fn render_predicate_match_arm(field: &Field) -> String {
+  let expr = match field.r#type {
+    FieldType::String | FieldType::Uuid | FieldType::Relation(_) => {
+      if field.optional {
+        format!(
+          "prismar::evaluate_string_field(self.{}.as_deref(), &predicate.filter)",
+          field.name
+        )
+      } else {
+        format!(
+          "prismar::evaluate_string_field(Some(self.{}.as_str()), &predicate.filter)",
+          field.name
+        )
+      }
+    }
+    FieldType::Int
+    | FieldType::BigInt
+    | FieldType::Float
+    | FieldType::Decimal => {
+      if field.optional {
+        format!(
+          "prismar::evaluate_number_field(self.{}.map(|value| value as f64), &predicate.filter)",
+          field.name
+        )
+      } else {
+        format!(
+          "prismar::evaluate_number_field(Some(self.{} as f64), &predicate.filter)",
+          field.name
+        )
+      }
+    }
+    FieldType::Boolean => {
+      if field.optional {
+        format!(
+          "prismar::evaluate_bool_field(self.{}, &predicate.filter)",
+          field.name
+        )
+      } else {
+        format!(
+          "prismar::evaluate_bool_field(Some(self.{}), &predicate.filter)",
+          field.name
+        )
+      }
+    }
+    FieldType::DateTime => {
+      if field.optional {
+        format!(
+          "prismar::evaluate_datetime_field(self.{}, &predicate.filter)",
+          field.name
+        )
+      } else {
+        format!(
+          "prismar::evaluate_datetime_field(Some(self.{}), &predicate.filter)",
+          field.name
+        )
+      }
+    }
+    FieldType::Json => {
+      if field.optional {
+        format!(
+          "prismar::evaluate_json_field(self.{}.as_ref(), &predicate.filter)",
+          field.name
+        )
+      } else {
+        format!(
+          "prismar::evaluate_json_field(Some(&self.{}), &predicate.filter)",
+          field.name
+        )
+      }
+    }
+    FieldType::Bytes => {
+      "Err(prismar::RuntimeError::InvalidFilter(\"bytes filters are not supported yet\".to_owned()))".to_owned()
+    }
+  };
+
+  format!("          \"{}\" => {},\n", field.name, expr)
 }
 
 fn parse_id_from_field_filter(field: &Field) -> String {
