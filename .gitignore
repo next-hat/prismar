@@ -1,1 +1,6 @@
-/target
+target/
+test_local/
+.vagrant/
+tests/*.img
+lcov.info
+tests/backup/*.yml
