@@ -7,13 +7,14 @@ This folder contains runnable Prismar scenarios.
 - `cargo_namespace/`
   - relation-driven generation (`Cargo` belongs to `Namespace`)
   - executable relation filters (`namespace.is`, `cargos.some`)
-  - generated relation loader helpers (`cargo.namespace(...)`, `namespace.cargos(...)`)
+  - include-based eager loading (`include_namespace()`, `include_cargos()`) in a single SQL query
+  - filtered includes (`include_namespace_where(...)`, `include_cargos_where(...)`)
   - custom generator derives (`utoipa::ToSchema`)
   - generated Diesel `schema.rs`
   - generated SQL migrations
   - runnable Rust fixture using `prismar::connection_pool()` and `prismar::with_connection()`
   - Prisma-style JSON query example
-  - custom wrapper structs for nested application views
+  - custom wrapper structs built from generated `*WithRelations` views
 
 ## Run
 
@@ -34,7 +35,9 @@ sh end2end/run.sh
 - generator block parsing
 - relation metadata to Diesel `belongs_to(...)`
 - relation filter execution against generated models
-- custom nested view structs built from generated relation helpers
+- single-query relation includes generated from typed filters
+- optional filters on included relations without filtering out the parent row
+- custom nested view structs built from generated `*WithRelations` results
 - generated `schema.rs`
 - generated `migration.sql`
 - Prisma-like JSON query payloads such as:

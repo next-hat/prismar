@@ -181,8 +181,8 @@ fn render_model_file(schema: &Schema, model: &Model) -> Result<String> {
   }
 
   let mut out = String::new();
-  out.push_str("use prismar::PrismaModel;\n");
-  out.push_str("use prismar::diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SelectableHelper};\n\n");
+  out.push_str("#[allow(unused_imports)]\nuse prismar::PrismaModel;\n");
+  out.push_str("use prismar::diesel::{ExpressionMethods, JoinOnDsl, OptionalExtension, QueryDsl, RunQueryDsl, SelectableHelper};\n\n");
   let mut imported_relations = BTreeSet::new();
   for relation in &all_relations {
     if imported_relations.insert(relation.other_model.clone()) {
@@ -301,6 +301,7 @@ fn render_model_file(schema: &Schema, model: &Model) -> Result<String> {
 
   out.push_str("#[allow(dead_code)]\n");
   out.push_str(format!("pub type {create_name} = {partial_name};\n").as_str());
+  render_include_query_support(schema, model, &all_relations, &mut out)?;
   render_relation_loader_impls(schema, model, &mut out)?;
   render_relation_filter_methods(schema, model, &filter_name, &mut out);
   render_model_traits(schema, model, &mut out)?;
@@ -329,6 +330,22 @@ fn render_relation_loader_impls(
 
     let self_field = &relation.self_fields[0];
     let other_field = &relation.other_fields[0];
+    let Some(other_model_schema) = schema
+      .models
+      .iter()
+      .find(|item| item.name == relation.other_model)
+    else {
+      continue;
+    };
+    let other_table = table_name(other_model_schema);
+    let Some(other_field_schema) = other_model_schema
+      .fields
+      .iter()
+      .find(|field| field.name == *other_field)
+    else {
+      continue;
+    };
+    let other_column = column_name(other_field_schema);
     match relation.kind {
       RelationKind::ToOne => {
         out.push_str(
@@ -339,20 +356,20 @@ fn render_relation_loader_impls(
           .as_str(),
         );
         out.push_str(
-          format!(
-            "    let related = std::boxed::Box::pin({}Db::find_many(client, None)).await?;\n",
-            relation.other_model
-          )
-          .as_str(),
+          format!("    let value = self.{self_field}.clone();\n").as_str(),
         );
-        out.push_str("    for row in related {\n");
+        out.push_str("    let related = ");
         out.push_str(
-          format!(
-            "      if row.{other_field} == self.{self_field} {{\n        return Ok(Some(row));\n      }}\n"
-          )
+          backend_dispatch_expr(schema, |backend| {
+            format!(
+              "      client.{backend}(move |conn| {{ super::schema::{other_table}::table.filter(super::schema::{other_table}::{other_column}.eq(value)).select({}Db::as_select()).first::<{}Db>(conn).optional() }}).await\n",
+              relation.other_model, relation.other_model
+            )
+          })
           .as_str(),
         );
-        out.push_str("    }\n    Ok(None)\n  }\n\n");
+        out.push_str(";\n");
+        out.push_str("    related\n  }\n\n");
       }
       RelationKind::ToMany => {
         out.push_str(
@@ -363,21 +380,32 @@ fn render_relation_loader_impls(
           .as_str(),
         );
         out.push_str(
-          format!(
-            "    let related = std::boxed::Box::pin({}Db::find_many(client, filter)).await?;\n",
-            relation.other_model
-          )
-          .as_str(),
+          format!("    let value = self.{self_field}.clone();\n").as_str(),
         );
-        out.push_str("    let mut matches = Vec::new();\n");
-        out.push_str("    for row in related {\n");
+        out.push_str("    let rows = ");
         out.push_str(
-          format!(
-            "      if row.{other_field} == self.{self_field} {{\n        matches.push(row);\n      }}\n"
-          )
+          backend_dispatch_expr(schema, |backend| {
+            format!(
+              "      client.{backend}(move |conn| {{ super::schema::{other_table}::table.filter(super::schema::{other_table}::{other_column}.eq(value)).select({}Db::as_select()).load::<{}Db>(conn) }}).await\n",
+              relation.other_model, relation.other_model
+            )
+          })
           .as_str(),
         );
-        out.push_str("    }\n    Ok(matches)\n  }\n\n");
+        out.push_str(";\n");
+        out.push_str("    let mut rows = rows?;\n");
+        out.push_str("    if let Some(filter) = filter {\n");
+        out.push_str("      let mut filtered = Vec::new();\n");
+        out.push_str("      for row in rows.drain(..) {\n");
+        out.push_str(
+          "        if row.matches_filter(client, &filter).await? {\n",
+        );
+        out.push_str("          filtered.push(row);\n");
+        out.push_str("        }\n");
+        out.push_str("      }\n");
+        out.push_str("      return Ok(filtered);\n");
+        out.push_str("    }\n");
+        out.push_str("    Ok(rows)\n  }\n\n");
       }
     }
   }
@@ -442,6 +470,170 @@ fn render_relation_filter_methods(
     }
   }
   out.push_str("}\n");
+}
+
+fn render_include_query_support(
+  schema: &Schema,
+  model: &Model,
+  relations: &[RelationMetadata],
+  out: &mut String,
+) -> Result<()> {
+  if relations.is_empty() {
+    return Ok(());
+  }
+
+  let db_name = format!("{}Db", model.name);
+  let filter_name = format!("{}Filter", db_name);
+  let view_name = format!("{}WithRelations", db_name);
+
+  out.push('\n');
+  out.push_str(
+    "#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]\n",
+  );
+  out.push_str(format!("pub struct {view_name} {{\n").as_str());
+  out.push_str(format!("  pub data: {db_name},\n").as_str());
+  for relation in relations {
+    match relation.kind {
+      RelationKind::ToOne => out.push_str(
+        format!(
+          "  pub {}: Option<{}Db>,\n",
+          relation.field_name, relation.other_model
+        )
+        .as_str(),
+      ),
+      RelationKind::ToMany => out.push_str(
+        format!(
+          "  pub {}: Vec<{}Db>,\n",
+          relation.field_name, relation.other_model
+        )
+        .as_str(),
+      ),
+    }
+  }
+  out.push_str("}\n\n");
+
+  out.push_str(format!("impl {view_name} {{\n").as_str());
+  out.push_str("  async fn matches_filter(&self, client: &prismar::PrismaClient, filter: &prismar::ModelFilter) -> Result<bool, prismar::RuntimeError> {\n");
+  out.push_str("    for condition in &filter.conditions {\n");
+  out.push_str("      let matched = match condition {\n");
+  out.push_str("        prismar::Condition::Predicate(predicate) => match predicate.field.as_str() {\n");
+  for field in persisted_fields(model) {
+    out.push_str(
+      render_predicate_match_arm_with_prefix(field, "self.data.").as_str(),
+    );
+  }
+  out.push_str("          unknown => Err(prismar::RuntimeError::InvalidFilter(format!(\"unknown field '{}'\", unknown))),\n");
+  out.push_str("        }?,\n");
+  out.push_str("        prismar::Condition::And(filters) => {\n");
+  out.push_str("          let mut all_match = true;\n");
+  out.push_str("          for inner in filters {\n");
+  out.push_str("            if !std::boxed::Box::pin(self.matches_filter(client, inner)).await? {\n");
+  out.push_str("              all_match = false;\n");
+  out.push_str("              break;\n");
+  out.push_str("            }\n");
+  out.push_str("          }\n");
+  out.push_str("          all_match\n");
+  out.push_str("        }\n");
+  out.push_str("        prismar::Condition::Or(filters) => {\n");
+  out.push_str("          let mut any_match = false;\n");
+  out.push_str("          for inner in filters {\n");
+  out.push_str("            if std::boxed::Box::pin(self.matches_filter(client, inner)).await? {\n");
+  out.push_str("              any_match = true;\n");
+  out.push_str("              break;\n");
+  out.push_str("            }\n");
+  out.push_str("          }\n");
+  out.push_str("          any_match\n");
+  out.push_str("        }\n");
+  out.push_str("        prismar::Condition::Not(inner) => !std::boxed::Box::pin(self.matches_filter(client, inner)).await?,\n");
+  out.push_str("        prismar::Condition::Relation(relation) => match relation.field.as_str() {\n");
+  for relation in relations {
+    out.push_str(render_included_relation_match_arm(relation).as_str());
+  }
+  out.push_str("          unknown => Err(prismar::RuntimeError::InvalidFilter(format!(\"unknown relation '{}'\", unknown))),\n");
+  out.push_str("        }?,\n");
+  out.push_str("      };\n");
+  out.push_str("      if !matched {\n");
+  out.push_str("        return Ok(false);\n");
+  out.push_str("      }\n");
+  out.push_str("    }\n");
+  out.push_str("    Ok(true)\n");
+  out.push_str("  }\n");
+  out.push_str("}\n\n");
+
+  out.push_str(format!("impl {filter_name} {{\n").as_str());
+  for relation in relations {
+    out.push_str(
+      format!(
+        "  pub fn include_{}(self) -> Self {{\n    self.include(\"{}\")\n  }}\n\n",
+        relation.field_name, relation.field_name
+      )
+      .as_str(),
+    );
+    out.push_str(
+      format!(
+        "  pub fn include_{}_where<T: prismar::TypedFilter>(self, filter: T) -> Self {{\n    self.include_with(\"{}\", filter)\n  }}\n\n",
+        relation.field_name, relation.field_name
+      )
+      .as_str(),
+    );
+  }
+  out.push_str("}\n\n");
+
+  out.push_str(format!("impl {db_name} {{\n").as_str());
+  out.push_str(
+    format!(
+      "  pub async fn find_many_with(client: &prismar::PrismaClient, query: {filter_name}) -> Result<Vec<{view_name}>, prismar::RuntimeError> {{\n"
+    )
+    .as_str(),
+  );
+  out.push_str("    let filter = query.clone().build();\n");
+  out.push_str("    let includes = query.includes().to_vec();\n");
+  out.push_str("    if includes.len() > 1 {\n      return Err(prismar::RuntimeError::InvalidFilter(\"multiple includes are not supported yet\".to_owned()));\n    }\n");
+  out.push_str(format!("    let mut rows: Vec<{view_name}> = if let Some(include) = includes.first() {{\n").as_str());
+  out.push_str("      let include_filter = include.filter.clone();\n");
+  out.push_str("      match include.relation.as_str() {\n");
+  for relation in relations {
+    if relation.self_fields.len() == 1 && relation.other_fields.len() == 1 {
+      out.push_str(
+        render_include_query_match_arm(schema, model, relation, relations)
+          .as_str(),
+      );
+    }
+  }
+  out.push_str("        unknown => return Err(prismar::RuntimeError::InvalidFilter(format!(\"unknown include '{}'\", unknown))),\n");
+  out.push_str("      }\n");
+  out.push_str("    } else {\n");
+  out.push_str(format!("      {}::find_many(client, None).await?.into_iter().map(|data| {view_name} {{\n", db_name).as_str());
+  for relation in relations {
+    match relation.kind {
+      RelationKind::ToOne => out
+        .push_str(format!("        {}: None,\n", relation.field_name).as_str()),
+      RelationKind::ToMany => out.push_str(
+        format!("        {}: Vec::new(),\n", relation.field_name).as_str(),
+      ),
+    }
+  }
+  out.push_str("        data,\n      }).collect::<Vec<_>>()\n    };\n");
+  out.push_str("    if !filter.is_empty() {\n");
+  out.push_str("      let mut filtered = Vec::new();\n");
+  out.push_str("      for row in rows.drain(..) {\n");
+  out.push_str("        if row.matches_filter(client, &filter).await? {\n          filtered.push(row);\n        }\n      }\n      rows = filtered;\n    }\n");
+  out.push_str("    Ok(rows)\n  }\n\n");
+  out.push_str(
+    format!(
+      "  pub async fn find_first_with(client: &prismar::PrismaClient, query: {filter_name}) -> Result<Option<{view_name}>, prismar::RuntimeError> {{\n    Ok(Self::find_many_with(client, query).await?.into_iter().next())\n  }}\n\n"
+    )
+    .as_str(),
+  );
+  out.push_str(
+    format!(
+      "  pub async fn find_unique_with(client: &prismar::PrismaClient, query: {filter_name}) -> Result<Option<{view_name}>, prismar::RuntimeError> {{\n    let mut rows = Self::find_many_with(client, query).await?;\n    if rows.len() > 1 {{\n      return Err(prismar::RuntimeError::NonUniqueResult(\"{db_name}\".to_owned()));\n    }}\n    Ok(rows.pop())\n  }}\n"
+    )
+    .as_str(),
+  );
+  out.push_str("}\n");
+
+  Ok(())
 }
 
 fn render_model_create_normalizer(
@@ -1081,17 +1273,24 @@ fn render_create_id_access(field: &Field) -> String {
 }
 
 fn render_predicate_match_arm(field: &Field) -> String {
+  render_predicate_match_arm_with_prefix(field, "self.")
+}
+
+fn render_predicate_match_arm_with_prefix(
+  field: &Field,
+  prefix: &str,
+) -> String {
   let expr = match field.r#type {
     FieldType::String | FieldType::Uuid | FieldType::Relation(_) => {
       if field.optional {
         format!(
-          "prismar::evaluate_string_field(self.{}.as_deref(), &predicate.filter)",
-          field.name
+          "prismar::evaluate_string_field({prefix}{}.as_deref(), &predicate.filter)",
+          field.name,
         )
       } else {
         format!(
-          "prismar::evaluate_string_field(Some(self.{}.as_str()), &predicate.filter)",
-          field.name
+          "prismar::evaluate_string_field(Some({prefix}{}.as_str()), &predicate.filter)",
+          field.name,
         )
       }
     }
@@ -1101,52 +1300,52 @@ fn render_predicate_match_arm(field: &Field) -> String {
     | FieldType::Decimal => {
       if field.optional {
         format!(
-          "prismar::evaluate_number_field(self.{}.map(|value| value as f64), &predicate.filter)",
-          field.name
+          "prismar::evaluate_number_field({prefix}{}.map(|value| value as f64), &predicate.filter)",
+          field.name,
         )
       } else {
         format!(
-          "prismar::evaluate_number_field(Some(self.{} as f64), &predicate.filter)",
-          field.name
+          "prismar::evaluate_number_field(Some({prefix}{} as f64), &predicate.filter)",
+          field.name,
         )
       }
     }
     FieldType::Boolean => {
       if field.optional {
         format!(
-          "prismar::evaluate_bool_field(self.{}, &predicate.filter)",
-          field.name
+          "prismar::evaluate_bool_field({prefix}{}, &predicate.filter)",
+          field.name,
         )
       } else {
         format!(
-          "prismar::evaluate_bool_field(Some(self.{}), &predicate.filter)",
-          field.name
+          "prismar::evaluate_bool_field(Some({prefix}{}), &predicate.filter)",
+          field.name,
         )
       }
     }
     FieldType::DateTime => {
       if field.optional {
         format!(
-          "prismar::evaluate_datetime_field(self.{}, &predicate.filter)",
-          field.name
+          "prismar::evaluate_datetime_field({prefix}{}, &predicate.filter)",
+          field.name,
         )
       } else {
         format!(
-          "prismar::evaluate_datetime_field(Some(self.{}), &predicate.filter)",
-          field.name
+          "prismar::evaluate_datetime_field(Some({prefix}{}), &predicate.filter)",
+          field.name,
         )
       }
     }
     FieldType::Json => {
       if field.optional {
         format!(
-          "prismar::evaluate_json_field(self.{}.as_ref(), &predicate.filter)",
-          field.name
+          "prismar::evaluate_json_field({prefix}{}.as_ref(), &predicate.filter)",
+          field.name,
         )
       } else {
         format!(
-          "prismar::evaluate_json_field(Some(&self.{}), &predicate.filter)",
-          field.name
+          "prismar::evaluate_json_field(Some(&{prefix}{}), &predicate.filter)",
+          field.name,
         )
       }
     }
@@ -1156,6 +1355,110 @@ fn render_predicate_match_arm(field: &Field) -> String {
   };
 
   format!("          \"{}\" => {},\n", field.name, expr)
+}
+
+fn render_included_relation_match_arm(relation: &RelationMetadata) -> String {
+  let field_name = &relation.field_name;
+  match relation.kind {
+    RelationKind::ToOne => format!(
+      "          \"{field_name}\" => match relation.op {{\n            prismar::RelationFilterOp::Is | prismar::RelationFilterOp::Some | prismar::RelationFilterOp::Every => match &self.{field_name} {{\n              Some(related) => std::boxed::Box::pin(related.matches_filter(client, &relation.filter)).await,\n              None => Ok(false),\n            }},\n            prismar::RelationFilterOp::IsNot | prismar::RelationFilterOp::None => match &self.{field_name} {{\n              Some(related) => Ok(!std::boxed::Box::pin(related.matches_filter(client, &relation.filter)).await?),\n              None => Ok(true),\n            }},\n          }},\n"
+    ),
+    RelationKind::ToMany => format!(
+      "          \"{field_name}\" => match relation.op {{\n            prismar::RelationFilterOp::Some => {{\n              let mut matched = false;\n              for related in &self.{field_name} {{\n                if std::boxed::Box::pin(related.matches_filter(client, &relation.filter)).await? {{\n                  matched = true;\n                  break;\n                }}\n              }}\n              Ok(matched)\n            }}\n            prismar::RelationFilterOp::Every => {{\n              let mut matched = true;\n              for related in &self.{field_name} {{\n                if !std::boxed::Box::pin(related.matches_filter(client, &relation.filter)).await? {{\n                  matched = false;\n                  break;\n                }}\n              }}\n              Ok(matched)\n            }}\n            prismar::RelationFilterOp::None => {{\n              let mut matched = true;\n              for related in &self.{field_name} {{\n                if std::boxed::Box::pin(related.matches_filter(client, &relation.filter)).await? {{\n                  matched = false;\n                  break;\n                }}\n              }}\n              Ok(matched)\n            }}\n            prismar::RelationFilterOp::Is | prismar::RelationFilterOp::IsNot => Err(prismar::RuntimeError::InvalidFilter(format!(\"relation '{field_name}' is to-many; use some/every/none\"))),\n          }},\n"
+    ),
+  }
+}
+
+fn render_include_query_match_arm(
+  schema: &Schema,
+  model: &Model,
+  relation: &RelationMetadata,
+  all_relations: &[RelationMetadata],
+) -> String {
+  let db_name = format!("{}Db", model.name);
+  let view_name = format!("{}WithRelations", db_name);
+  let base_table = table_name(model);
+  let self_field = &relation.self_fields[0];
+  let other_field = &relation.other_fields[0];
+  let Some(other_model_schema) = schema
+    .models
+    .iter()
+    .find(|item| item.name == relation.other_model)
+  else {
+    return String::new();
+  };
+  let other_table = table_name(other_model_schema);
+  let self_column = model
+    .fields
+    .iter()
+    .find(|field| field.name == *self_field)
+    .map(column_name)
+    .unwrap_or_else(|| self_field.clone());
+  let other_column = other_model_schema
+    .fields
+    .iter()
+    .find(|field| field.name == *other_field)
+    .map(column_name)
+    .unwrap_or_else(|| other_field.clone());
+
+  match relation.kind {
+    RelationKind::ToOne => format!(
+      "        \"{}\" => {{\n          let rows: Result<Vec<({db_name}, Option<{}Db>)>, prismar::RuntimeError> = {};\n          let include_filter = include_filter.unwrap_or_default();\n          let mut loaded = Vec::new();\n          for (data, related) in rows? {{\n            let related = if include_filter.is_empty() {{\n              related\n            }} else {{\n              match related {{\n                Some(related) => {{\n                  if std::boxed::Box::pin(related.matches_filter(client, &include_filter)).await? {{\n                    Some(related)\n                  }} else {{\n                    None\n                  }}\n                }}\n                None => None,\n              }}\n            }};\n            loaded.push({view_name} {{\n              data,\n              {}: related,\n{}            }});\n          }}\n          loaded\n        }}\n",
+      relation.field_name,
+      relation.other_model,
+      backend_dispatch_expr(schema, |backend| {
+        format!(
+          "client.{backend}(|conn| {{ super::schema::{base_table}::table.left_outer_join(super::schema::{other_table}::table.on(super::schema::{base_table}::{self_column}.eq(super::schema::{other_table}::{other_column}))).select(({db_name}::as_select(), Option::<{}Db>::as_select())).load::<({db_name}, Option<{}Db>)>(conn) }}).await",
+          relation.other_model, relation.other_model
+        )
+      }),
+      relation.field_name,
+      relations_default_initializers(all_relations, &relation.field_name)
+    ),
+    RelationKind::ToMany => format!(
+      "        \"{}\" => {{\n          let rows: Result<Vec<({db_name}, Option<{}Db>)>, prismar::RuntimeError> = {};\n          let include_filter = include_filter.unwrap_or_default();\n          let mut grouped: Vec<{view_name}> = Vec::new();\n          for (data, related) in rows? {{\n            let related = if include_filter.is_empty() {{\n              related\n            }} else {{\n              match related {{\n                Some(related) => {{\n                  if std::boxed::Box::pin(related.matches_filter(client, &include_filter)).await? {{\n                    Some(related)\n                  }} else {{\n                    None\n                  }}\n                }}\n                None => None,\n              }}\n            }};\n            if let Some(existing) = grouped.iter_mut().find(|item| item.data.{} == data.{}) {{\n              if let Some(related) = related {{\n                existing.{}.push(related);\n              }}\n            }} else {{\n              let mut item = {view_name} {{\n                data: data.clone(),\n                {}: Vec::new(),\n{}              }};\n              if let Some(related) = related {{\n                item.{}.push(related);\n              }}\n              grouped.push(item);\n            }}\n          }}\n          grouped\n        }}\n",
+      relation.field_name,
+      relation.other_model,
+      backend_dispatch_expr(schema, |backend| {
+        format!(
+          "client.{backend}(|conn| {{ super::schema::{base_table}::table.left_outer_join(super::schema::{other_table}::table.on(super::schema::{base_table}::{self_column}.eq(super::schema::{other_table}::{other_column}))).select(({db_name}::as_select(), Option::<{}Db>::as_select())).load::<({db_name}, Option<{}Db>)>(conn) }}).await",
+          relation.other_model, relation.other_model
+        )
+      }),
+      single_primary_key_field(model)
+        .map(|field| field.name.as_str())
+        .unwrap_or("id"),
+      single_primary_key_field(model)
+        .map(|field| field.name.as_str())
+        .unwrap_or("id"),
+      relation.field_name,
+      relation.field_name,
+      relations_default_initializers(all_relations, &relation.field_name),
+      relation.field_name
+    ),
+  }
+}
+
+fn relations_default_initializers(
+  relations: &[RelationMetadata],
+  except: &str,
+) -> String {
+  let mut out = String::new();
+  for relation in relations {
+    if relation.field_name == except {
+      continue;
+    }
+    match relation.kind {
+      RelationKind::ToOne => out.push_str(
+        format!("                {}: None,\n", relation.field_name).as_str(),
+      ),
+      RelationKind::ToMany => out.push_str(
+        format!("                {}: Vec::new(),\n", relation.field_name)
+          .as_str(),
+      ),
+    }
+  }
+  out
 }
 
 fn render_relation_match_arm(relation: &RelationMetadata) -> String {

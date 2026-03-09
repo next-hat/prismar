@@ -329,6 +329,47 @@ Generated relation filter helpers follow Prisma naming:
 - to-one relations: `_is`, `_is_not`
 - to-many relations: `_some`, `_every`, `_none`
 
+### Include related rows
+
+Generated filters can also request eager-loaded relations in a single SQL query.
+
+```rust
+let cargo = CargoDb::find_unique_with(
+  &client,
+  CargoDbFilter::new()
+    .key(StringFilter::Equals("cargo.system.api".to_owned()))
+    .include_namespace(),
+)
+.await?;
+
+let namespace = NamespaceDb::find_unique_with(
+  &client,
+  NamespaceDbFilter::new()
+    .name(StringFilter::Equals("system".to_owned()))
+    .include_cargos(),
+)
+.await?;
+
+let namespace = NamespaceDb::find_unique_with(
+  &client,
+  NamespaceDbFilter::new()
+    .name(StringFilter::Equals("system".to_owned()))
+    .include_cargos_where(
+      CargoDbFilter::new().name(StringFilter::Equals("api".to_owned())),
+    ),
+)
+.await?;
+```
+
+The generated result types keep the base row in `data` and attach the included relation fields alongside it:
+
+- `CargoDbWithRelations { data, namespace }`
+- `NamespaceDbWithRelations { data, cargos }`
+
+Use `include_<relation>_where(...)` when the parent row should still be returned but the included relation should only be materialized if it matches the provided filter.
+
+Current support is limited to one included relation per query.
+
 ### Find unique
 
 ```rust

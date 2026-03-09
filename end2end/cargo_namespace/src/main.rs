@@ -17,13 +17,13 @@ const FIXTURE_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
 #[derive(Debug)]
 struct NamespaceWithCargoes {
-  namespace: NamespaceDb,
+  namespace: generated::NamespaceDbWithRelations,
   cargoes: Vec<CargoDb>,
 }
 
 #[derive(Debug)]
 struct CargoWithNamespace {
-  cargo: CargoDb,
+  cargo: generated::CargoDbWithRelations,
   namespace: Option<NamespaceDb>,
 }
 
@@ -153,13 +153,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .find_by_id::<CargoDb>(&cargo_id)
     .await?
     .ok_or_else(|| std::io::Error::other("cargo not found"))?;
+  let namespace_with_cargoes_row = NamespaceDb::find_unique_with(
+    &client,
+    NamespaceDbFilter::new()
+      .name(StringFilter::Equals("system".to_owned()))
+      .include_cargos(),
+  )
+  .await?
+  .ok_or_else(|| std::io::Error::other("namespace with cargos not found"))?;
+  let cargo_with_namespace_row = CargoDb::find_unique_with(
+    &client,
+    CargoDbFilter::new()
+      .key(StringFilter::Equals("cargo.system.api".to_owned()))
+      .include_namespace(),
+  )
+  .await?
+  .ok_or_else(|| std::io::Error::other("cargo with namespace not found"))?;
+  let namespace_with_filtered_cargos = NamespaceDb::find_unique_with(
+    &client,
+    NamespaceDbFilter::new()
+      .name(StringFilter::Equals("system".to_owned()))
+      .include_cargos_where(
+        CargoDbFilter::new().name(StringFilter::Equals("api".to_owned())),
+      ),
+  )
+  .await?
+  .ok_or_else(|| std::io::Error::other("namespace with filtered cargos not found"))?;
+  let cargo_with_filtered_namespace = CargoDb::find_unique_with(
+    &client,
+    CargoDbFilter::new()
+      .key(StringFilter::Equals("cargo.system.api".to_owned()))
+      .include_namespace_where(
+        NamespaceDbFilter::new().name(StringFilter::Equals("missing".to_owned())),
+      ),
+  )
+  .await?
+  .ok_or_else(|| std::io::Error::other("cargo with filtered namespace not found"))?;
   let namespace_with_cargoes = NamespaceWithCargoes {
-    namespace: namespace.clone(),
-    cargoes: namespace.cargos(&client, None).await?,
+    cargoes: namespace_with_cargoes_row.cargos.clone(),
+    namespace: namespace_with_cargoes_row,
   };
   let cargo_with_namespace = CargoWithNamespace {
-    cargo: cargo.clone(),
-    namespace: cargo.namespace(&client).await?,
+    namespace: cargo_with_namespace_row.namespace.clone(),
+    cargo: cargo_with_namespace_row,
   };
 
   assert_eq!(namespaces.len(), 1);
@@ -171,10 +207,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   assert_eq!(total, 2);
   assert_eq!(unique.key, "cargo.system.api");
   assert_eq!(first.status_key, "running");
-  assert_eq!(namespace_with_cargoes.namespace.name, "system");
+  assert_eq!(namespace_with_cargoes.namespace.data.name, "system");
   assert_eq!(namespace_with_cargoes.cargoes.len(), 2);
-  assert_eq!(cargo_with_namespace.cargo.key, "cargo.system.api");
+  assert_eq!(namespace_with_filtered_cargos.cargos.len(), 1);
+  assert_eq!(namespace_with_filtered_cargos.cargos[0].name, "api");
+  assert_eq!(cargo_with_namespace.cargo.data.key, "cargo.system.api");
   assert_eq!(cargo_with_namespace.namespace.as_ref().map(|item| item.name.as_str()), Some("system"));
+  assert!(cargo_with_filtered_namespace.namespace.is_none());
   assert_eq!(cargo.namespace_name, "system");
   assert_eq!(cargo.name, "api");
   assert!(!cargo.spec_key.is_empty());

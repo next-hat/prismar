@@ -1,5 +1,6 @@
+#[allow(unused_imports)]
 use prismar::PrismaModel;
-use prismar::diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SelectableHelper};
+use prismar::diesel::{ExpressionMethods, JoinOnDsl, OptionalExtension, QueryDsl, RunQueryDsl, SelectableHelper};
 
 use super::NamespaceDb;
 
@@ -41,15 +42,188 @@ pub struct CargoUpdate {
 #[allow(dead_code)]
 pub type CargoCreate = CargoPartial;
 
-impl CargoDb {
-  pub async fn namespace(&self, client: &prismar::PrismaClient) -> Result<Option<NamespaceDb>, prismar::RuntimeError> {
-    let related = std::boxed::Box::pin(NamespaceDb::find_many(client, None)).await?;
-    for row in related {
-      if row.name == self.namespace_name {
-        return Ok(Some(row));
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CargoDbWithRelations {
+  pub data: CargoDb,
+  pub namespace: Option<NamespaceDb>,
+}
+
+impl CargoDbWithRelations {
+  async fn matches_filter(&self, client: &prismar::PrismaClient, filter: &prismar::ModelFilter) -> Result<bool, prismar::RuntimeError> {
+    for condition in &filter.conditions {
+      let matched = match condition {
+        prismar::Condition::Predicate(predicate) => match predicate.field.as_str() {
+          "key" => prismar::evaluate_string_field(Some(self.data.key.as_str()), &predicate.filter),
+          "created_at" => prismar::evaluate_datetime_field(Some(self.data.created_at), &predicate.filter),
+          "name" => prismar::evaluate_string_field(Some(self.data.name.as_str()), &predicate.filter),
+          "spec_key" => prismar::evaluate_string_field(Some(self.data.spec_key.as_str()), &predicate.filter),
+          "status_key" => prismar::evaluate_string_field(Some(self.data.status_key.as_str()), &predicate.filter),
+          "namespace_name" => prismar::evaluate_string_field(Some(self.data.namespace_name.as_str()), &predicate.filter),
+          unknown => Err(prismar::RuntimeError::InvalidFilter(format!("unknown field '{}'", unknown))),
+        }?,
+        prismar::Condition::And(filters) => {
+          let mut all_match = true;
+          for inner in filters {
+            if !std::boxed::Box::pin(self.matches_filter(client, inner)).await? {
+              all_match = false;
+              break;
+            }
+          }
+          all_match
+        }
+        prismar::Condition::Or(filters) => {
+          let mut any_match = false;
+          for inner in filters {
+            if std::boxed::Box::pin(self.matches_filter(client, inner)).await? {
+              any_match = true;
+              break;
+            }
+          }
+          any_match
+        }
+        prismar::Condition::Not(inner) => !std::boxed::Box::pin(self.matches_filter(client, inner)).await?,
+        prismar::Condition::Relation(relation) => match relation.field.as_str() {
+          "namespace" => match relation.op {
+            prismar::RelationFilterOp::Is | prismar::RelationFilterOp::Some | prismar::RelationFilterOp::Every => match &self.namespace {
+              Some(related) => std::boxed::Box::pin(related.matches_filter(client, &relation.filter)).await,
+              None => Ok(false),
+            },
+            prismar::RelationFilterOp::IsNot | prismar::RelationFilterOp::None => match &self.namespace {
+              Some(related) => Ok(!std::boxed::Box::pin(related.matches_filter(client, &relation.filter)).await?),
+              None => Ok(true),
+            },
+          },
+          unknown => Err(prismar::RuntimeError::InvalidFilter(format!("unknown relation '{}'", unknown))),
+        }?,
+      };
+      if !matched {
+        return Ok(false);
       }
     }
-    Ok(None)
+    Ok(true)
+  }
+}
+
+impl CargoDbFilter {
+  pub fn include_namespace(self) -> Self {
+    self.include("namespace")
+  }
+
+  pub fn include_namespace_where<T: prismar::TypedFilter>(self, filter: T) -> Self {
+    self.include_with("namespace", filter)
+  }
+
+}
+
+impl CargoDb {
+  pub async fn find_many_with(client: &prismar::PrismaClient, query: CargoDbFilter) -> Result<Vec<CargoDbWithRelations>, prismar::RuntimeError> {
+    let filter = query.clone().build();
+    let includes = query.includes().to_vec();
+    if includes.len() > 1 {
+      return Err(prismar::RuntimeError::InvalidFilter("multiple includes are not supported yet".to_owned()));
+    }
+    let mut rows: Vec<CargoDbWithRelations> = if let Some(include) = includes.first() {
+      let include_filter = include.filter.clone();
+      match include.relation.as_str() {
+        "namespace" => {
+          let rows: Result<Vec<(CargoDb, Option<NamespaceDb>)>, prismar::RuntimeError> = match client.provider() {
+      prismar::Provider::Sqlite => {
+        #[cfg(feature = "sqlite")] {
+client.run_sqlite(|conn| { super::schema::cargoes::table.left_outer_join(super::schema::namespaces::table.on(super::schema::cargoes::namespace_name.eq(super::schema::namespaces::name))).select((CargoDb::as_select(), Option::<NamespaceDb>::as_select())).load::<(CargoDb, Option<NamespaceDb>)>(conn) }).await        }
+        #[cfg(not(feature = "sqlite"))] { Err(prismar::RuntimeError::UnsupportedProvider("sqlite")) }
+      }
+      prismar::Provider::Postgres => {
+        #[cfg(feature = "postgres")] {
+client.run_postgres(|conn| { super::schema::cargoes::table.left_outer_join(super::schema::namespaces::table.on(super::schema::cargoes::namespace_name.eq(super::schema::namespaces::name))).select((CargoDb::as_select(), Option::<NamespaceDb>::as_select())).load::<(CargoDb, Option<NamespaceDb>)>(conn) }).await        }
+        #[cfg(not(feature = "postgres"))] { Err(prismar::RuntimeError::UnsupportedProvider("postgres")) }
+      }
+      prismar::Provider::MySql => {
+        #[cfg(feature = "mysql")] {
+client.run_mysql(|conn| { super::schema::cargoes::table.left_outer_join(super::schema::namespaces::table.on(super::schema::cargoes::namespace_name.eq(super::schema::namespaces::name))).select((CargoDb::as_select(), Option::<NamespaceDb>::as_select())).load::<(CargoDb, Option<NamespaceDb>)>(conn) }).await        }
+        #[cfg(not(feature = "mysql"))] { Err(prismar::RuntimeError::UnsupportedProvider("mysql")) }
+      }
+    };
+          let include_filter = include_filter.unwrap_or_default();
+          let mut loaded = Vec::new();
+          for (data, related) in rows? {
+            let related = if include_filter.is_empty() {
+              related
+            } else {
+              match related {
+                Some(related) => {
+                  if std::boxed::Box::pin(related.matches_filter(client, &include_filter)).await? {
+                    Some(related)
+                  } else {
+                    None
+                  }
+                }
+                None => None,
+              }
+            };
+            loaded.push(CargoDbWithRelations {
+              data,
+              namespace: related,
+            });
+          }
+          loaded
+        }
+        unknown => return Err(prismar::RuntimeError::InvalidFilter(format!("unknown include '{}'", unknown))),
+      }
+    } else {
+      CargoDb::find_many(client, None).await?.into_iter().map(|data| CargoDbWithRelations {
+        namespace: None,
+        data,
+      }).collect::<Vec<_>>()
+    };
+    if !filter.is_empty() {
+      let mut filtered = Vec::new();
+      for row in rows.drain(..) {
+        if row.matches_filter(client, &filter).await? {
+          filtered.push(row);
+        }
+      }
+      rows = filtered;
+    }
+    Ok(rows)
+  }
+
+  pub async fn find_first_with(client: &prismar::PrismaClient, query: CargoDbFilter) -> Result<Option<CargoDbWithRelations>, prismar::RuntimeError> {
+    Ok(Self::find_many_with(client, query).await?.into_iter().next())
+  }
+
+  pub async fn find_unique_with(client: &prismar::PrismaClient, query: CargoDbFilter) -> Result<Option<CargoDbWithRelations>, prismar::RuntimeError> {
+    let mut rows = Self::find_many_with(client, query).await?;
+    if rows.len() > 1 {
+      return Err(prismar::RuntimeError::NonUniqueResult("CargoDb".to_owned()));
+    }
+    Ok(rows.pop())
+  }
+}
+
+impl CargoDb {
+  pub async fn namespace(&self, client: &prismar::PrismaClient) -> Result<Option<NamespaceDb>, prismar::RuntimeError> {
+    let value = self.namespace_name.clone();
+    let related = match client.provider() {
+      prismar::Provider::Sqlite => {
+        #[cfg(feature = "sqlite")] {
+      client.run_sqlite(move |conn| { super::schema::namespaces::table.filter(super::schema::namespaces::name.eq(value)).select(NamespaceDb::as_select()).first::<NamespaceDb>(conn).optional() }).await
+        }
+        #[cfg(not(feature = "sqlite"))] { Err(prismar::RuntimeError::UnsupportedProvider("sqlite")) }
+      }
+      prismar::Provider::Postgres => {
+        #[cfg(feature = "postgres")] {
+      client.run_postgres(move |conn| { super::schema::namespaces::table.filter(super::schema::namespaces::name.eq(value)).select(NamespaceDb::as_select()).first::<NamespaceDb>(conn).optional() }).await
+        }
+        #[cfg(not(feature = "postgres"))] { Err(prismar::RuntimeError::UnsupportedProvider("postgres")) }
+      }
+      prismar::Provider::MySql => {
+        #[cfg(feature = "mysql")] {
+      client.run_mysql(move |conn| { super::schema::namespaces::table.filter(super::schema::namespaces::name.eq(value)).select(NamespaceDb::as_select()).first::<NamespaceDb>(conn).optional() }).await
+        }
+        #[cfg(not(feature = "mysql"))] { Err(prismar::RuntimeError::UnsupportedProvider("mysql")) }
+      }
+    };
+    related
   }
 
 }

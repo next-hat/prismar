@@ -36,6 +36,7 @@ fn expand_prismar_model(
   };
 
   let filter_name = format_ident!("{}Filter", model_name);
+  let include_name = format_ident!("{}Include", filter_name);
 
   let mut methods = Vec::new();
   for field in fields {
@@ -43,15 +44,60 @@ fn expand_prismar_model(
   }
 
   Ok(quote! {
+    #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+    #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+    pub struct #include_name {
+      pub relation: ::std::string::String,
+      #[serde(skip_serializing_if = "Option::is_none")]
+      pub filter: Option<::prismar::ModelFilter>,
+    }
+
+    impl #include_name {
+      fn new(
+        relation: impl Into<::std::string::String>,
+        filter: Option<::prismar::ModelFilter>,
+      ) -> Self {
+        Self {
+          relation: relation.into(),
+          filter,
+        }
+      }
+    }
+
     #[derive(Debug, Clone, Default, PartialEq)]
     #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
     pub struct #filter_name {
       inner: ::prismar::ModelFilter,
+      includes: ::std::vec::Vec<#include_name>,
     }
 
     impl #filter_name {
       pub fn new() -> Self {
         Self::default()
+      }
+
+      fn push_include(
+        &mut self,
+        relation: ::std::string::String,
+        filter: Option<::prismar::ModelFilter>,
+      ) {
+        if let Some(existing) = self
+          .includes
+          .iter_mut()
+          .find(|include| include.relation == relation)
+        {
+          if let Some(filter) = filter {
+            existing.filter = Some(filter);
+          }
+        } else {
+          self.includes.push(#include_name::new(relation, filter));
+        }
+      }
+
+      fn merge_includes(&mut self, includes: ::std::vec::Vec<#include_name>) {
+        for include in includes {
+          self.push_include(include.relation, include.filter);
+        }
       }
 
       pub fn and_where<F>(mut self, build: F) -> Self
@@ -74,17 +120,38 @@ fn expand_prismar_model(
 
       pub fn and(mut self, other: Self) -> Self {
         self.inner = self.inner.and_group(vec![other.inner]);
+        self.merge_includes(other.includes);
         self
       }
 
       pub fn or(mut self, other: Self) -> Self {
         self.inner = self.inner.or_group(vec![other.inner]);
+        self.merge_includes(other.includes);
         self
       }
 
       pub fn not(mut self, other: Self) -> Self {
         self.inner = self.inner.not_group(other.inner);
+        self.merge_includes(other.includes);
         self
+      }
+
+      pub fn include(mut self, relation: impl Into<::std::string::String>) -> Self {
+        self.push_include(relation.into(), None);
+        self
+      }
+
+      pub fn include_with<T: ::prismar::TypedFilter>(
+        mut self,
+        relation: impl Into<::std::string::String>,
+        filter: T,
+      ) -> Self {
+        self.push_include(relation.into(), Some(filter.into_model_filter()));
+        self
+      }
+
+      pub fn includes(&self) -> &[#include_name] {
+        &self.includes
       }
 
       pub fn build(self) -> ::prismar::ModelFilter {
