@@ -1,0 +1,14 @@
+/home/leone/Documents/next-hat/prismar/end2end/cargo_namespace/target/debug/deps/serde-995b8a58fc746daf.d: /home/leone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/leone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/leone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/leone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/leone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/leone/Documents/next-hat/prismar/end2end/cargo_namespace/target/debug/build/serde-252a9bbeccb60cd9/out/private.rs
+
+/home/leone/Documents/next-hat/prismar/end2end/cargo_namespace/target/debug/deps/libserde-995b8a58fc746daf.rlib: /home/leone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/leone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/leone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/leone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/leone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/leone/Documents/next-hat/prismar/end2end/cargo_namespace/target/debug/build/serde-252a9bbeccb60cd9/out/private.rs
+
+/home/leone/Documents/next-hat/prismar/end2end/cargo_namespace/target/debug/deps/libserde-995b8a58fc746daf.rmeta: /home/leone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/leone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/leone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/leone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/leone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/leone/Documents/next-hat/prismar/end2end/cargo_namespace/target/debug/build/serde-252a9bbeccb60cd9/out/private.rs
+
+/home/leone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/home/leone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/home/leone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/home/leone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/home/leone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/home/leone/Documents/next-hat/prismar/end2end/cargo_namespace/target/debug/build/serde-252a9bbeccb60cd9/out/private.rs:
+
+# env-dep:OUT_DIR=/home/leone/Documents/next-hat/prismar/end2end/cargo_namespace/target/debug/build/serde-252a9bbeccb60cd9/out

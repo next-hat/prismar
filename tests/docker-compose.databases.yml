@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: prismar-postgres
+    environment:
+      POSTGRES_USER: prismar
+      POSTGRES_PASSWORD: prismar
+      POSTGRES_DB: prismar
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prismar -d prismar"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mysql:
+    image: mysql:8.4
+    container_name: prismar-mysql
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: prismar
+      MYSQL_USER: prismar
+      MYSQL_PASSWORD: prismar
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "prismar", "-pprismar"]
+      interval: 5s
+      timeout: 5s
+      retries: 30

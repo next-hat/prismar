@@ -1,0 +1,103 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "test prismar_schema",
+			"type": "shell",
+			"command": "/home/leone/.cargo/bin/cargo",
+			"args": [
+				"test",
+				"-p",
+				"prismar_schema"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "test prismar json",
+			"type": "shell",
+			"command": "/home/leone/.cargo/bin/cargo",
+			"args": [
+				"test",
+				"-p",
+				"prismar",
+				"prisma_json"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "generate fixture",
+			"type": "shell",
+			"command": "/home/leone/.cargo/bin/cargo",
+			"args": [
+				"run",
+				"-p",
+				"prismar-cli",
+				"--",
+				"generate",
+				"--schema",
+				"end2end/cargo_namespace/schema.prisma",
+				"--output",
+				"end2end/cargo_namespace/generated"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "test prisma_json only",
+			"type": "shell",
+			"command": "/home/leone/.cargo/bin/cargo",
+			"args": [
+				"test",
+				"-p",
+				"prismar",
+				"--test",
+				"prisma_json"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "generate fixture rerun",
+			"type": "shell",
+			"command": "/home/leone/.cargo/bin/cargo",
+			"args": [
+				"run",
+				"-p",
+				"prismar-cli",
+				"--",
+				"generate",
+				"--schema",
+				"end2end/cargo_namespace/schema.prisma",
+				"--output",
+				"end2end/cargo_namespace/generated"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest prismar_schema",
+			"type": "shell",
+			"command": "/home/leone/.cargo/bin/cargo",
+			"args": [
+				"test",
+				"-p",
+				"prismar_schema"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "regenerate fixture relation",
+			"type": "shell",
+			"command": "/home/leone/.cargo/bin/cargo",
+			"args": [
+				"run",
+				"-p",
+				"prismar-cli",
+				"--",
+				"generate",
+				"--schema",
+				"end2end/cargo_namespace/schema.prisma",
+				"--output",
+				"end2end/cargo_namespace/generated"
+			],
+			"isBackground": false
+		}
+	]
+}

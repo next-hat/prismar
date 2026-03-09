@@ -1,0 +1,33 @@
+[package]
+name = "prismar"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Prisma-like typed filters for Diesel + ntex"
+license.workspace = true
+
+[features]
+default = ["derive", "sqlite", "postgres"]
+derive = ["dep:prismar_derive"]
+utoipa = ["dep:utoipa"]
+sqlite = ["diesel/sqlite", "dep:libsqlite3-sys"]
+postgres = ["diesel/postgres"]
+mysql = ["diesel/mysql"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+diesel = { version = "2.3", features = ["r2d2"] }
+diesel_migrations = "2.3"
+ntex = { version = "3", features = ["tokio"] }
+prismar_derive = { path = "../prismar_derive", version = "0.1.0", optional = true }
+utoipa = { version = "5", optional = true, features = ["uuid", "chrono"] }
+libsqlite3-sys = { version = "0.35", features = ["bundled"], optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
+diesel = { version = "2.3", features = ["sqlite", "r2d2"] }
+libsqlite3-sys = { version = "0.35", features = ["bundled"] }

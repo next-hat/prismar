@@ -1,0 +1,25 @@
+generator prismar {
+  provider = "prismar-cli"
+  output = "./generated"
+  db_derives = ["utoipa::ToSchema"]
+  partial_derives = ["utoipa::ToSchema"]
+  update_derives = ["utoipa::ToSchema"]
+  generate_json_types = true
+}
+
+model Namespace {
+  name String @id
+  cargos Cargo[]
+  @@map("namespaces")
+}
+
+model Cargo {
+  key            String    @id
+  created_at     DateTime
+  name           String
+  spec_key       String @default(uuid())
+  status_key     String
+  namespace_name String
+  namespace      Namespace @relation(fields: [namespace_name], references: [name])
+  @@map("cargoes")
+}

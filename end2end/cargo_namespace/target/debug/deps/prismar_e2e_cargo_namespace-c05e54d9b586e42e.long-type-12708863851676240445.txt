@@ -1,0 +1,48 @@
+(T, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18)
+(T, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19)
+(T, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20)
+(T, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21)
+(T, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22)
+(T, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23)
+(T, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24)
+(T, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25)
+(T, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26)
+(T, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27)
+(T, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28)
+(T, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28, T29)
+(T, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28, T29, T30)
+(T, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28, T29, T30, T31)
+CaseWhen<diesel::expression::case_when::non_public_types::CaseWhenConditionsIntermediateNode<W, T, Whens>, E>
+CaseWhen<diesel::expression::case_when::non_public_types::CaseWhenConditionsLeaf<W, T>, diesel::expression::case_when::non_public_types::ElseExpression<E>>
+CaseWhen<diesel::expression::case_when::non_public_types::CaseWhenConditionsLeaf<W, T>, diesel::expression::case_when::non_public_types::NoElseExpression>
+diesel::expression::functions::aggregate_expressions::AggregateExpression<Fn, Prefix, Order, Filter, Window>
+diesel::expression::functions::window_functions::first_value_utils::first_value<T, value>
+diesel::expression::functions::window_functions::lag_with_offset_and_default_utils::lag_with_offset_and_default<T, T2, value, offset, default>
+diesel::expression::functions::window_functions::lag_with_offset_utils::lag_with_offset<T, value, offset>
+diesel::expression::functions::window_functions::last_value_utils::last_value<T, value>
+diesel::expression::functions::window_functions::lead_with_offset_and_default_utils::lead_with_offset_and_default<T, T2, value, offset, default>
+diesel::expression::functions::window_functions::lead_with_offset_utils::lead_with_offset<T, value, offset>
+diesel::expression::functions::window_functions::nth_value_utils::nth_value<T, value, n>
+diesel::sqlite::expression::functions::json_array_1_utils::json_array_1<V1, value_1>
+diesel::sqlite::expression::functions::json_array_2_utils::json_array_2<V1, V2, value_1, value_2>
+diesel::sqlite::expression::functions::json_array_length_utils::json_array_length<J, j>
+diesel::sqlite::expression::functions::json_array_length_with_path_utils::json_array_length_with_path<J, j, path>
+diesel::sqlite::expression::functions::json_error_position_utils::json_error_position<X, x>
+diesel::sqlite::expression::functions::json_group_array_utils::json_group_array<E, elements>
+diesel::sqlite::expression::functions::json_group_object_utils::json_group_object<N, V, names, values>
+diesel::sqlite::expression::functions::json_patch_utils::json_patch<T, P, target, patch>
+diesel::sqlite::expression::functions::json_pretty_with_indentation_utils::json_pretty_with_indentation<J, j, indentation>
+diesel::sqlite::expression::functions::json_remove_1_utils::json_remove_1<J, json, path_1>
+diesel::sqlite::expression::functions::json_remove_2_utils::json_remove_2<J, json, path_1, path_2>
+diesel::sqlite::expression::functions::json_type_with_path_utils::json_type_with_path<J, j, path>
+diesel::sqlite::expression::functions::jsonb_array_1_utils::jsonb_array_1<V1, value_1>
+diesel::sqlite::expression::functions::jsonb_array_2_utils::jsonb_array_2<V1, V2, value_1, value_2>
+diesel::sqlite::expression::functions::jsonb_group_array_utils::jsonb_group_array<E, elements>
+diesel::sqlite::expression::functions::jsonb_group_object_utils::jsonb_group_object<N, V, names, values>
+diesel::sqlite::expression::functions::jsonb_patch_utils::jsonb_patch<T, P, target, patch>
+diesel::sqlite::expression::functions::jsonb_remove_0_utils::jsonb_remove_0<J, json>
+diesel::sqlite::expression::functions::jsonb_remove_1_utils::jsonb_remove_1<J, json, path_1>
+diesel::sqlite::expression::functions::jsonb_remove_2_utils::jsonb_remove_2<J, json, path_1, path_2>
+AppearsOnTable<diesel_migrations::migration_harness::__diesel_schema_migrations::table>
+(Option<diesel::expression::grouped::Grouped<diesel::expression::operators::Eq<cargoes::columns::created_at, diesel::expression::bound::Bound<diesel::sql_types::Timestamp, NaiveDateTime>>>>, Option<diesel::expression::grouped::Grouped<diesel::expression::operators::Eq<cargoes::columns::name, diesel::expression::bound::Bound<diesel::sql_types::Text, std::string::String>>>>, Option<diesel::expression::grouped::Grouped<diesel::expression::operators::Eq<cargoes::columns::spec_key, uuid::Uuid>>>, Option<diesel::expression::grouped::Grouped<diesel::expression::operators::Eq<cargoes::columns::status_key, diesel::expression::bound::Bound<diesel::sql_types::Text, std::string::String>>>>, Option<diesel::expression::grouped::Grouped<diesel::expression::operators::Eq<cargoes::columns::namespace_name, diesel::expression::bound::Bound<diesel::sql_types::Text, std::string::String>>>>)
+(Option<diesel::expression::grouped::Grouped<diesel::expression::operators::Eq<cargoes::columns::created_at, diesel::expression::bound::Bound<diesel::sql_types::Timestamp, &'update NaiveDateTime>>>>, Option<diesel::expression::grouped::Grouped<diesel::expression::operators::Eq<cargoes::columns::name, diesel::expression::bound::Bound<diesel::sql_types::Text, &'update std::string::String>>>>, Option<diesel::expression::grouped::Grouped<diesel::expression::operators::Eq<cargoes::columns::spec_key, &'update uuid::Uuid>>>, Option<diesel::expression::grouped::Grouped<diesel::expression::operators::Eq<cargoes::columns::status_key, diesel::expression::bound::Bound<diesel::sql_types::Text, &'update std::string::String>>>>, Option<diesel::expression::grouped::Grouped<diesel::expression::operators::Eq<cargoes::columns::namespace_name, diesel::expression::bound::Bound<diesel::sql_types::Text, &'update std::string::String>>>>)

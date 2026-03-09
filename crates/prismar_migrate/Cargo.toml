@@ -1,0 +1,13 @@
+[package]
+name = "prismar_migrate"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Schema diff and SQL generation for prismar"
+
+[dependencies]
+prismar_schema = { path = "../prismar_schema" }
+thiserror.workspace = true
+chrono.workspace = true
+diesel_migrations = "2.3"

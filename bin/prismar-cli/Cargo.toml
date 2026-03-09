@@ -1,0 +1,27 @@
+[package]
+name = "prismar-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "CLI for Prisma schema validation and migration SQL generation"
+
+[[bin]]
+name = "prismar"
+path = "src/main.rs"
+
+[features]
+default = ["sqlite", "postgres"]
+sqlite = []
+postgres = ["diesel/postgres"]
+mysql = ["diesel/mysql"]
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+chrono.workspace = true
+diesel = { version = "2.3", default-features = false }
+rusqlite = { version = "0.37", features = ["bundled"] }
+sha2 = "0.10"
+prismar_schema = { path = "../../crates/prismar_schema" }
+prismar_migrate = { path = "../../crates/prismar_migrate" }

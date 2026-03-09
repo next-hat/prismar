@@ -1,0 +1,8 @@
+{
+  "where": {
+    "OR": [
+      { "key": "cargo.system.api" },
+      { "namespace": { "is": { "name": "system" } } }
+    ]
+  }
+}

@@ -1,0 +1,25 @@
+[package]
+name = "prismar-e2e-cargo-namespace"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[features]
+default = ["sqlite"]
+sqlite = []
+postgres = []
+mysql = []
+utoipa = []
+
+[workspace]
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+diesel = { version = "2.3", features = ["sqlite", "r2d2", "chrono", "uuid", "serde_json"] }
+libsqlite3-sys = { version = "0.35", features = ["bundled"] }
+ntex = { version = "3", features = ["tokio"] }
+prismar = { path = "../../crates/prismar" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+utoipa = { version = "5", features = ["uuid", "chrono"] }
+uuid = { version = "1", features = ["serde", "v4"] }
