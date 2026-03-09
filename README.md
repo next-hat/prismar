@@ -219,7 +219,7 @@ Example payload:
 ```json
 {
   "where": {
-    "id": "idvalue"
+    "key": "cargo.system.api"
   }
 }
 ```
@@ -233,6 +233,8 @@ let filter = args.where.unwrap();
 
 let rows = client.find_many::<CargoDb>(Some(filter)).await?;
 ```
+
+That `find_many()` example is valid today because it targets the primary key.
 
 Another example with logical composition:
 
@@ -283,8 +285,7 @@ let cargos = client.find_many::<CargoDb>(None).await?;
 let filtered = client
   .find_many::<CargoDb>(Some(
     CargoDbFilter::new()
-      .namespace_name(StringFilter::Equals("system".to_owned()))
-      .status_key(StringFilter::Equals("running".to_owned()))
+      .key(StringFilter::Equals("cargo.system.api".to_owned()))
       .into(),
   ))
   .await?;
@@ -362,6 +363,8 @@ client
 ```
 
 Current limitation: generic `update(filter, ...)`, `delete(filter)`, and filtered `find_many(Some(filter))` only resolve simple primary-key equality today. Full arbitrary filter execution is planned separately.
+
+The richer operators shown in the JSON section are already parsed into `ModelFilter`, and can be rendered or inspected, but end-to-end execution is currently limited as noted above.
 
 ## Runtime helpers
 
