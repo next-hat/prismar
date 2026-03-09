@@ -78,7 +78,10 @@ impl PrismaClient {
       Provider::Sqlite => {
         #[cfg(feature = "sqlite")]
         {
-          PrismaClientInner::Sqlite(Prismar::new(database_url, crate::SqlBackend::Sqlite)?)
+          PrismaClientInner::Sqlite(Prismar::new(
+            database_url,
+            crate::SqlBackend::Sqlite,
+          )?)
         }
         #[cfg(not(feature = "sqlite"))]
         {
@@ -88,7 +91,10 @@ impl PrismaClient {
       Provider::Postgres => {
         #[cfg(feature = "postgres")]
         {
-          PrismaClientInner::Postgres(Prismar::new(database_url, crate::SqlBackend::Postgres)?)
+          PrismaClientInner::Postgres(Prismar::new(
+            database_url,
+            crate::SqlBackend::Postgres,
+          )?)
         }
         #[cfg(not(feature = "postgres"))]
         {
@@ -98,7 +104,10 @@ impl PrismaClient {
       Provider::MySql => {
         #[cfg(feature = "mysql")]
         {
-          PrismaClientInner::MySql(Prismar::new(database_url, crate::SqlBackend::MySql)?)
+          PrismaClientInner::MySql(Prismar::new(
+            database_url,
+            crate::SqlBackend::MySql,
+          )?)
         }
         #[cfg(not(feature = "mysql"))]
         {
@@ -146,7 +155,10 @@ impl PrismaClient {
     self.find_many::<M>(None).await
   }
 
-  pub async fn find_by_id<M>(&self, id: &M::Id) -> Result<Option<M>, RuntimeError>
+  pub async fn find_by_id<M>(
+    &self,
+    id: &M::Id,
+  ) -> Result<Option<M>, RuntimeError>
   where
     M: crate::PrismaModel,
   {
@@ -211,7 +223,10 @@ impl PrismaClient {
   }
 
   #[cfg(feature = "postgres")]
-  pub async fn run_postgres<R, F>(&self, operation: F) -> Result<R, RuntimeError>
+  pub async fn run_postgres<R, F>(
+    &self,
+    operation: F,
+  ) -> Result<R, RuntimeError>
   where
     R: Send + 'static,
     F: FnOnce(&mut diesel::pg::PgConnection) -> diesel::QueryResult<R>
@@ -305,7 +320,9 @@ where
   }
 }
 
-pub fn connection_pool<Conn>(database_url: impl Into<String>) -> Result<Pool<ConnectionManager<Conn>>, RuntimeError>
+pub fn connection_pool<Conn>(
+  database_url: impl Into<String>,
+) -> Result<Pool<ConnectionManager<Conn>>, RuntimeError>
 where
   Conn: Connection + diesel::r2d2::R2D2Connection + 'static,
 {

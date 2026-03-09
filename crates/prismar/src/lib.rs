@@ -3,10 +3,17 @@ mod runtime;
 mod sql;
 
 pub use diesel;
-pub use runtime::{PrismaClient, Prismar, Provider, RuntimeError, connection_pool, with_connection, with_raw_query};
+pub use diesel_migrations::{
+  EmbeddedMigrations, MigrationHarness, embed_migrations,
+};
+pub use json_query::{
+  PrismaReadManyInput, PrismaWhereInput, parse_model_filter,
+};
+pub use runtime::{
+  PrismaClient, Prismar, Provider, RuntimeError, connection_pool,
+  with_connection, with_raw_query,
+};
 pub use sql::{RenderedFilter, SqlBackend};
-pub use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
-pub use json_query::{PrismaReadManyInput, PrismaWhereInput, parse_model_filter};
 
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};

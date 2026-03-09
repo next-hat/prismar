@@ -1,7 +1,7 @@
 use prismar::{
-  CountArgs, CreateArgs, CreateManyArgs, DeleteArgs, DeleteManyArgs, FieldFilter,
-  ModelFilter, NumberOps, ReadManyArgs, ReadUniqueArgs, UpdateArgs,
-  UpdateManyArgs,
+  CountArgs, CreateArgs, CreateManyArgs, DeleteArgs, DeleteManyArgs,
+  FieldFilter, ModelFilter, NumberOps, ReadManyArgs, ReadUniqueArgs,
+  UpdateArgs, UpdateManyArgs,
 };
 
 #[test]

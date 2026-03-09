@@ -136,7 +136,10 @@ pub fn parse_schema(input: &str) -> Result<Schema, SchemaError> {
   })
 }
 
-pub fn find_generator<'a>(schema: &'a Schema, provider: &str) -> Option<&'a Generator> {
+pub fn find_generator<'a>(
+  schema: &'a Schema,
+  provider: &str,
+) -> Option<&'a Generator> {
   schema
     .generators
     .iter()
@@ -158,7 +161,11 @@ fn normalize_lines(input: &str) -> Vec<String> {
           i += 1;
           continue;
         }
-        if !in_quotes && i + 1 < chars.len() && chars[i] == '/' && chars[i + 1] == '/' {
+        if !in_quotes
+          && i + 1 < chars.len()
+          && chars[i] == '/'
+          && chars[i + 1] == '/'
+        {
           break;
         }
         out.push(chars[i]);
@@ -169,7 +176,10 @@ fn normalize_lines(input: &str) -> Vec<String> {
     .collect()
 }
 
-fn collect_block(lines: &[String], start: usize) -> Result<(Vec<String>, usize), SchemaError> {
+fn collect_block(
+  lines: &[String],
+  start: usize,
+) -> Result<(Vec<String>, usize), SchemaError> {
   let mut block = Vec::new();
   let mut brace_depth = 0i32;
   let mut found_open = false;
@@ -199,7 +209,10 @@ fn collect_block(lines: &[String], start: usize) -> Result<(Vec<String>, usize),
   })
 }
 
-fn parse_datasource(block: &[String], start_line: usize) -> Result<Datasource, SchemaError> {
+fn parse_datasource(
+  block: &[String],
+  start_line: usize,
+) -> Result<Datasource, SchemaError> {
   let header = block
     .first()
     .ok_or_else(|| SchemaError::Invalid {
@@ -250,7 +263,10 @@ fn parse_datasource(block: &[String], start_line: usize) -> Result<Datasource, S
   })
 }
 
-fn parse_generator(block: &[String], start_line: usize) -> Result<Generator, SchemaError> {
+fn parse_generator(
+  block: &[String],
+  start_line: usize,
+) -> Result<Generator, SchemaError> {
   let header = block
     .first()
     .ok_or_else(|| SchemaError::Invalid {
@@ -285,10 +301,11 @@ fn parse_generator(block: &[String], start_line: usize) -> Result<Generator, Sch
       });
     };
 
-    let parsed_value = parse_generator_value(value).ok_or_else(|| SchemaError::Invalid {
-      line: start_line + offset,
-      message: format!("invalid generator value for {key}"),
-    })?;
+    let parsed_value =
+      parse_generator_value(value).ok_or_else(|| SchemaError::Invalid {
+        line: start_line + offset,
+        message: format!("invalid generator value for {key}"),
+      })?;
 
     match key {
       "provider" => {
@@ -315,7 +332,10 @@ fn parse_generator(block: &[String], start_line: usize) -> Result<Generator, Sch
   })
 }
 
-fn parse_model(block: &[String], start_line: usize) -> Result<Model, SchemaError> {
+fn parse_model(
+  block: &[String],
+  start_line: usize,
+) -> Result<Model, SchemaError> {
   let header = block
     .first()
     .ok_or_else(|| SchemaError::Invalid {
@@ -506,7 +526,11 @@ fn parse_field_attribute(token: &str) -> FieldAttribute {
   } else if token.starts_with("@default(") {
     FieldAttribute::Default(trim_wrapped(token, "@default(", ")"))
   } else if token.starts_with("@map(") {
-    FieldAttribute::Map(trim_wrapped(token, "@map(", ")").trim_matches('"').to_owned())
+    FieldAttribute::Map(
+      trim_wrapped(token, "@map(", ")")
+        .trim_matches('"')
+        .to_owned(),
+    )
   } else if token.starts_with("@relation(") {
     FieldAttribute::Relation(trim_wrapped(token, "@relation(", ")"))
   } else {
@@ -577,7 +601,11 @@ fn parse_generator_value(input: &str) -> Option<GeneratorValue> {
   if trimmed.starts_with('[') && trimmed.ends_with(']') {
     let inner = &trimmed[1..trimmed.len() - 1];
     let mut values = Vec::new();
-    for value in inner.split(',').map(str::trim).filter(|value| !value.is_empty()) {
+    for value in inner
+      .split(',')
+      .map(str::trim)
+      .filter(|value| !value.is_empty())
+    {
       values.push(value.trim_matches('"').to_owned());
     }
     return Some(GeneratorValue::List(values));

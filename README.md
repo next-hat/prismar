@@ -1,5 +1,10 @@
 # Prismar
 
+[![Tests](https://github.com/next-hat/prismar/actions/workflows/tests.yml/badge.svg)](https://github.com/next-hat/prismar/actions/workflows/tests.yml)
+[![Clippy](https://github.com/next-hat/prismar/actions/workflows/clippy.yml/badge.svg)](https://github.com/next-hat/prismar/actions/workflows/clippy.yml)
+[![codecov](https://codecov.io/gh/next-hat/prismar/branch/master/graph/badge.svg?token=4I60HOW6HM)](https://codecov.io/gh/next-hat/prismar)
+
+
 Prismar provides three pieces that work together:
 
 - a lightweight Prisma schema parser

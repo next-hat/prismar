@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::Utc;
-pub use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
+pub use diesel_migrations::{
+  EmbeddedMigrations, MigrationHarness, embed_migrations,
+};
 use prismar_schema::{Field, FieldAttribute, FieldType, Model, Schema};
 use thiserror::Error;
 
@@ -15,7 +17,10 @@ pub enum SqlBackend {
 #[derive(Debug, Error)]
 pub enum MigrationError {
   #[error("unsupported operation for backend {backend:?}: {operation}")]
-  Unsupported { backend: SqlBackend, operation: String },
+  Unsupported {
+    backend: SqlBackend,
+    operation: String,
+  },
 }
 
 pub fn backend_from_provider(provider: &str) -> SqlBackend {
@@ -27,7 +32,10 @@ pub fn backend_from_provider(provider: &str) -> SqlBackend {
   }
 }
 
-pub fn generate_schema_sql(schema: &Schema, backend: SqlBackend) -> Vec<String> {
+pub fn generate_schema_sql(
+  schema: &Schema,
+  backend: SqlBackend,
+) -> Vec<String> {
   schema
     .models
     .iter()
@@ -35,7 +43,11 @@ pub fn generate_schema_sql(schema: &Schema, backend: SqlBackend) -> Vec<String> 
     .collect()
 }
 
-pub fn diff_schema_sql(old: &Schema, new: &Schema, backend: SqlBackend) -> Vec<String> {
+pub fn diff_schema_sql(
+  old: &Schema,
+  new: &Schema,
+  backend: SqlBackend,
+) -> Vec<String> {
   let mut statements = Vec::new();
 
   let old_map = old
@@ -111,12 +123,16 @@ fn table_name(model: &Model) -> String {
     .unwrap_or_else(|| model.name.to_lowercase())
 }
 
-fn render_create_table(schema: &Schema, model: &Model, backend: SqlBackend) -> String {
+fn render_create_table(
+  schema: &Schema,
+  model: &Model,
+  backend: SqlBackend,
+) -> String {
   let table = table_name(model);
   let columns = persisted_fields(model)
     .iter()
     .map(|field| render_column(field, backend))
-    .chain(relation_constraints(schema, model).into_iter())
+    .chain(relation_constraints(schema, model))
     .collect::<Vec<_>>()
     .join(",\n  ");
 
@@ -148,7 +164,9 @@ fn render_column(field: &Field, backend: SqlBackend) -> String {
         }
       }
       FieldAttribute::UpdatedAt => {}
-      FieldAttribute::Map(_) | FieldAttribute::Relation(_) | FieldAttribute::Other(_) => {}
+      FieldAttribute::Map(_)
+      | FieldAttribute::Relation(_)
+      | FieldAttribute::Other(_) => {}
     }
   }
 
@@ -202,13 +220,20 @@ fn render_database_default(value: &str) -> bool {
     || value.starts_with("ulid("))
 }
 
-fn render_drop_column(table: &str, column: &str, backend: SqlBackend) -> String {
+fn render_drop_column(
+  table: &str,
+  column: &str,
+  backend: SqlBackend,
+) -> String {
   match backend {
     SqlBackend::Postgres | SqlBackend::MySql => {
       format!("ALTER TABLE {} DROP COLUMN {};", table, column)
     }
     SqlBackend::Sqlite => {
-      format!("-- manual action required: SQLite drop column {}.{}", table, column)
+      format!(
+        "-- manual action required: SQLite drop column {}.{}",
+        table, column
+      )
     }
   }
 }

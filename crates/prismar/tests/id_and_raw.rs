@@ -18,7 +18,12 @@ fn supports_read_and_delete_by_various_id_types() {
     id: IdSelector::new("namespace_name", "system"),
   };
   let parsed = args.to_filter().unwrap();
-  assert!(parsed.render(SqlBackend::Postgres).sql.contains("namespace_name = $1"));
+  assert!(
+    parsed
+      .render(SqlBackend::Postgres)
+      .sql
+      .contains("namespace_name = $1")
+  );
 
   let delete = DeleteByIdArgs {
     id: IdSelector::new("id", 7_u64),

@@ -1,6 +1,6 @@
 use diesel::{
-  connection::SimpleConnection,
   RunQueryDsl,
+  connection::SimpleConnection,
   dsl::sql,
   r2d2::{ConnectionManager, Pool},
   sql_types::Integer,
@@ -22,7 +22,8 @@ async fn executes_diesel_query_on_ntex_runtime() {
   .unwrap();
 
   let result = with_connection(pool, |conn| {
-    diesel::select(sql::<Integer>("SUM(val) + 1 FROM values_table")).get_result::<i32>(conn)
+    diesel::select(sql::<Integer>("SUM(val) + 1 FROM values_table"))
+      .get_result::<i32>(conn)
   })
   .await
   .unwrap();

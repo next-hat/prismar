@@ -2,20 +2,21 @@ mod generate;
 
 use std::{
   collections::{BTreeMap, BTreeSet},
-  env,
-  fs,
+  env, fs,
   path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use clap::{Parser, Subcommand, ValueEnum};
-use diesel::{Connection as DieselConnection, QueryableByName, RunQueryDsl, sql_query};
 #[cfg(feature = "mysql")]
 use diesel::mysql::MysqlConnection;
 #[cfg(feature = "postgres")]
 use diesel::pg::PgConnection;
 use diesel::sql_types::{Nullable, Text};
+use diesel::{
+  Connection as DieselConnection, QueryableByName, RunQueryDsl, sql_query,
+};
 use prismar_migrate::{
   backend_from_provider, default_migration_name, diff_schema_sql,
 };
@@ -184,15 +185,23 @@ fn main() -> Result<()> {
         }
 
         let version = default_migration_name();
-        let migration_name = sanitize_name(name.unwrap_or_else(|| "migration".to_owned()));
-        let folder = migrations_dir.join(format!("{}_{}", version, migration_name));
-        fs::create_dir_all(&folder)
-          .with_context(|| format!("failed to create migration folder {}", folder.display()))?;
+        let migration_name =
+          sanitize_name(name.unwrap_or_else(|| "migration".to_owned()));
+        let folder =
+          migrations_dir.join(format!("{}_{}", version, migration_name));
+        fs::create_dir_all(&folder).with_context(|| {
+          format!("failed to create migration folder {}", folder.display())
+        })?;
 
         let migration_file = folder.join("migration.sql");
-        fs::write(&migration_file, statements.join("\n") + "\n").with_context(|| {
-          format!("failed to write migration file {}", migration_file.display())
-        })?;
+        fs::write(&migration_file, statements.join("\n") + "\n").with_context(
+          || {
+            format!(
+              "failed to write migration file {}",
+              migration_file.display()
+            )
+          },
+        )?;
 
         if !migrations_dir.exists() {
           fs::create_dir_all(&migrations_dir).with_context(|| {
@@ -203,9 +212,14 @@ fn main() -> Result<()> {
           })?;
         }
 
-        fs::write(&snapshot_path, fs::read_to_string(&schema)?).with_context(|| {
-          format!("failed to write schema snapshot {}", snapshot_path.display())
-        })?;
+        fs::write(&snapshot_path, fs::read_to_string(&schema)?).with_context(
+          || {
+            format!(
+              "failed to write schema snapshot {}",
+              snapshot_path.display()
+            )
+          },
+        )?;
 
         println!("Created migration {}", migration_file.display());
       }
@@ -233,7 +247,9 @@ fn main() -> Result<()> {
           return Ok(());
         }
 
-        if let Some(url) = resolve_database_url(parsed.datasource.as_ref(), database_url) {
+        if let Some(url) =
+          resolve_database_url(parsed.datasource.as_ref(), database_url)
+        {
           match backend {
             prismar_migrate::SqlBackend::Sqlite => {
               #[cfg(not(feature = "sqlite"))]
@@ -244,10 +260,10 @@ fn main() -> Result<()> {
               }
               #[cfg(feature = "sqlite")]
               {
-              let conn = sqlite_connect(&url)?;
-              ensure_migrations_table(&conn)?;
-              let applied = load_applied_map(&conn)?;
-              print_status(local, applied);
+                let conn = sqlite_connect(&url)?;
+                ensure_migrations_table(&conn)?;
+                let applied = load_applied_map(&conn)?;
+                print_status(local, applied);
               }
             }
             prismar_migrate::SqlBackend::Postgres
@@ -271,8 +287,11 @@ fn main() -> Result<()> {
       } => {
         let parsed = load_schema(&schema)?;
         let backend = determine_backend(&parsed, provider);
-        let url = resolve_database_url(parsed.datasource.as_ref(), database_url)
-          .ok_or_else(|| anyhow::anyhow!("database url is required for deploy"))?;
+        let url =
+          resolve_database_url(parsed.datasource.as_ref(), database_url)
+            .ok_or_else(|| {
+              anyhow::anyhow!("database url is required for deploy")
+            })?;
 
         let migrations = load_migration_files(&migrations_dir)?;
         if migrations.is_empty() {
@@ -290,49 +309,55 @@ fn main() -> Result<()> {
             }
             #[cfg(feature = "sqlite")]
             {
-            let conn = sqlite_connect(&url)?;
-            ensure_migrations_table(&conn)?;
-            let applied = load_applied_map(&conn)?;
+              let conn = sqlite_connect(&url)?;
+              ensure_migrations_table(&conn)?;
+              let applied = load_applied_map(&conn)?;
 
-            let mut applied_count = 0usize;
-            for migration in migrations {
-              if applied.contains_key(&migration.version) {
-                continue;
+              let mut applied_count = 0usize;
+              for migration in migrations {
+                if applied.contains_key(&migration.version) {
+                  continue;
+                }
+
+                conn.execute_batch("BEGIN TRANSACTION;")?;
+                let apply_result = conn.execute_batch(&migration.sql);
+                match apply_result {
+                  Ok(_) => {
+                    let insert_sql = format!(
+                      "INSERT INTO {DIESEL_MIGRATIONS_TABLE} (version, run_on) VALUES (?1, ?2)"
+                    );
+                    conn.execute(
+                      &insert_sql,
+                      (migration.version.clone(), Utc::now().to_rfc3339()),
+                    )?;
+                    conn.execute_batch("COMMIT;")?;
+                    println!("Applied {}", migration.folder);
+                    applied_count += 1;
+                  }
+                  Err(err) => {
+                    let _ = conn.execute_batch("ROLLBACK;");
+                    return Err(anyhow::anyhow!(
+                      "failed to apply migration {}: {}",
+                      migration.folder,
+                      err
+                    ));
+                  }
+                }
               }
 
-              conn.execute_batch("BEGIN TRANSACTION;")?;
-              let apply_result = conn.execute_batch(&migration.sql);
-              match apply_result {
-                Ok(_) => {
-                  let insert_sql = format!(
-                    "INSERT INTO {DIESEL_MIGRATIONS_TABLE} (version, run_on) VALUES (?1, ?2)"
-                  );
-                  conn.execute(
-                    &insert_sql,
-                    (migration.version.clone(), Utc::now().to_rfc3339()),
-                  )?;
-                  conn.execute_batch("COMMIT;")?;
-                  println!("Applied {}", migration.folder);
-                  applied_count += 1;
-                }
-                Err(err) => {
-                  let _ = conn.execute_batch("ROLLBACK;");
-                  return Err(anyhow::anyhow!(
-                    "failed to apply migration {}: {}",
-                    migration.folder,
-                    err
-                  ));
-                }
-              }
-            }
-
-            println!("Deploy complete. Applied {} migration(s).", applied_count);
+              println!(
+                "Deploy complete. Applied {} migration(s).",
+                applied_count
+              );
             }
           }
           prismar_migrate::SqlBackend::Postgres
           | prismar_migrate::SqlBackend::MySql => {
             let applied_count = deploy_diesel(&url, backend, migrations)?;
-            println!("Deploy complete. Applied {} migration(s).", applied_count);
+            println!(
+              "Deploy complete. Applied {} migration(s).",
+              applied_count
+            );
           }
         }
       }
@@ -343,8 +368,11 @@ fn main() -> Result<()> {
       } => {
         let parsed = load_schema(&schema)?;
         let backend = determine_backend(&parsed, provider);
-        let url = resolve_database_url(parsed.datasource.as_ref(), database_url)
-          .ok_or_else(|| anyhow::anyhow!("database url is required for drift checks"))?;
+        let url =
+          resolve_database_url(parsed.datasource.as_ref(), database_url)
+            .ok_or_else(|| {
+              anyhow::anyhow!("database url is required for drift checks")
+            })?;
 
         match backend {
           prismar_migrate::SqlBackend::Sqlite => {
@@ -356,15 +384,15 @@ fn main() -> Result<()> {
             }
             #[cfg(feature = "sqlite")]
             {
-            let conn = sqlite_connect(&url)?;
-            let live_schema = introspect_sqlite_schema(&conn)?;
-            let statements = diff_schema_sql(&live_schema, &parsed, backend);
-            if statements.is_empty() {
-              println!("No drift detected.");
-            } else {
-              println!("Drift detected. SQL needed to reconcile:");
-              println!("{}", statements.join("\n"));
-            }
+              let conn = sqlite_connect(&url)?;
+              let live_schema = introspect_sqlite_schema(&conn)?;
+              let statements = diff_schema_sql(&live_schema, &parsed, backend);
+              if statements.is_empty() {
+                println!("No drift detected.");
+              } else {
+                println!("Drift detected. SQL needed to reconcile:");
+                println!("{}", statements.join("\n"));
+              }
             }
           }
           prismar_migrate::SqlBackend::Postgres
@@ -431,10 +459,10 @@ fn resolve_database_url(
     return Some(url);
   }
 
-  if let Ok(url) = env::var("DATABASE_URL") {
-    if !url.trim().is_empty() {
-      return Some(url);
-    }
+  if let Ok(url) = env::var("DATABASE_URL")
+    && !url.trim().is_empty()
+  {
+    return Some(url);
   }
 
   let raw = datasource?.url.as_ref()?.trim().to_owned();
@@ -470,7 +498,8 @@ fn ensure_migrations_table(conn: &Connection) -> Result<()> {
       run_on TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );"
   );
-  conn.execute_batch(&sql)
+  conn
+    .execute_batch(&sql)
     .context("failed to ensure diesel migrations table")
 }
 
@@ -556,9 +585,9 @@ fn load_applied_map_diesel(
         ))
       }
     }
-    prismar_migrate::SqlBackend::Sqlite => Err(anyhow::anyhow!(
-      "diesel applied map is not used for sqlite"
-    )),
+    prismar_migrate::SqlBackend::Sqlite => {
+      Err(anyhow::anyhow!("diesel applied map is not used for sqlite"))
+    }
   }
 }
 
@@ -650,8 +679,9 @@ fn connect_postgres(database_url: &str) -> Result<PgConnection> {
     format!("postgres://{database_url}")
   };
 
-  PgConnection::establish(&normalized_url)
-    .with_context(|| format!("failed to connect to database {}", normalized_url))
+  PgConnection::establish(&normalized_url).with_context(|| {
+    format!("failed to connect to database {}", normalized_url)
+  })
 }
 
 #[cfg(feature = "mysql")]
@@ -662,8 +692,9 @@ fn connect_mysql(database_url: &str) -> Result<MysqlConnection> {
     format!("mysql://{database_url}")
   };
 
-  MysqlConnection::establish(&normalized_url)
-    .with_context(|| format!("failed to connect to database {}", normalized_url))
+  MysqlConnection::establish(&normalized_url).with_context(|| {
+    format!("failed to connect to database {}", normalized_url)
+  })
 }
 
 #[cfg(feature = "postgres")]
@@ -683,11 +714,12 @@ fn deploy_with_pg(
       .context("failed to begin postgres transaction")?;
     let statements = split_sql_statements(&migration.sql);
     for statement in statements {
-      sql_query(statement)
-        .execute(conn)
-        .with_context(|| {
-          format!("failed to execute migration statement in {}", migration.folder)
-        })?;
+      sql_query(statement).execute(conn).with_context(|| {
+        format!(
+          "failed to execute migration statement in {}",
+          migration.folder
+        )
+      })?;
     }
     let insert_sql = format!(
       "INSERT INTO {DIESEL_MIGRATIONS_TABLE} (version, run_on) VALUES ($1, $2)"
@@ -729,11 +761,12 @@ fn deploy_with_mysql(
       .context("failed to begin mysql transaction")?;
     let statements = split_sql_statements(&migration.sql);
     for statement in statements {
-      sql_query(statement)
-        .execute(conn)
-        .with_context(|| {
-          format!("failed to execute migration statement in {}", migration.folder)
-        })?;
+      sql_query(statement).execute(conn).with_context(|| {
+        format!(
+          "failed to execute migration statement in {}",
+          migration.folder
+        )
+      })?;
     }
     let insert_sql = format!(
       "INSERT INTO {DIESEL_MIGRATIONS_TABLE} (version, run_on) VALUES (?, ?)"
@@ -765,27 +798,35 @@ struct AppliedMigrationRow {
 }
 
 #[cfg(feature = "postgres")]
-fn load_applied_map_pg(conn: &mut PgConnection) -> Result<BTreeMap<String, String>> {
+fn load_applied_map_pg(
+  conn: &mut PgConnection,
+) -> Result<BTreeMap<String, String>> {
   let query = format!("SELECT version FROM {DIESEL_MIGRATIONS_TABLE}");
   let rows: Vec<AppliedMigrationRow> = sql_query(query)
-  .load(conn)
-  .context("failed to query _prismar_migrations")?;
-  Ok(rows
-    .into_iter()
-    .map(|row| (row.version, String::new()))
-    .collect())
+    .load(conn)
+    .context("failed to query _prismar_migrations")?;
+  Ok(
+    rows
+      .into_iter()
+      .map(|row| (row.version, String::new()))
+      .collect(),
+  )
 }
 
 #[cfg(feature = "mysql")]
-fn load_applied_map_mysql(conn: &mut MysqlConnection) -> Result<BTreeMap<String, String>> {
+fn load_applied_map_mysql(
+  conn: &mut MysqlConnection,
+) -> Result<BTreeMap<String, String>> {
   let query = format!("SELECT version FROM {DIESEL_MIGRATIONS_TABLE}");
   let rows: Vec<AppliedMigrationRow> = sql_query(query)
-  .load(conn)
-  .context("failed to query _prismar_migrations")?;
-  Ok(rows
-    .into_iter()
-    .map(|row| (row.version, String::new()))
-    .collect())
+    .load(conn)
+    .context("failed to query _prismar_migrations")?;
+  Ok(
+    rows
+      .into_iter()
+      .map(|row| (row.version, String::new()))
+      .collect(),
+  )
 }
 
 #[derive(Debug, Clone)]
@@ -815,9 +856,10 @@ fn load_migration_files(migrations_dir: &Path) -> Result<Vec<MigrationFile>> {
       continue;
     }
 
-    let sql: String = fs::read_to_string(&migration_file).with_context(|| {
-      format!("failed to read migration file {}", migration_file.display())
-    })?;
+    let sql: String =
+      fs::read_to_string(&migration_file).with_context(|| {
+        format!("failed to read migration file {}", migration_file.display())
+      })?;
 
     let (version, _name) = split_migration_folder(&folder);
     files.push(MigrationFile {
@@ -851,7 +893,7 @@ fn introspect_sqlite_schema(conn: &Connection) -> Result<Schema> {
   let mut models = Vec::new();
   for table_row in table_rows {
     let table_name = table_row?;
-    let pragma = format!("PRAGMA table_info('{}')", table_name.replace('"', "\""));
+    let pragma = format!("PRAGMA table_info('{table_name}')");
     let mut pragma_stmt = conn.prepare(&pragma)?;
     let field_rows = pragma_stmt.query_map([], |row| {
       let name: String = row.get(1)?;
@@ -1017,7 +1059,10 @@ struct PgColumnRow {
 }
 
 #[cfg(feature = "postgres")]
-fn introspect_postgres_columns(conn: &mut PgConnection, table_name: &str) -> Result<Vec<Field>> {
+fn introspect_postgres_columns(
+  conn: &mut PgConnection,
+  table_name: &str,
+) -> Result<Vec<Field>> {
   let rows: Vec<PgColumnRow> = sql_query(
     "SELECT c.column_name, c.data_type, c.is_nullable, c.column_default,
             EXISTS (
@@ -1085,7 +1130,10 @@ struct MySqlColumnRow {
 }
 
 #[cfg(feature = "mysql")]
-fn introspect_mysql_columns(conn: &mut MysqlConnection, table_name: &str) -> Result<Vec<Field>> {
+fn introspect_mysql_columns(
+  conn: &mut MysqlConnection,
+  table_name: &str,
+) -> Result<Vec<Field>> {
   let rows: Vec<MySqlColumnRow> = sql_query(
     "SELECT c.column_name, c.data_type, c.is_nullable, c.column_default,
             c.column_key
@@ -1132,7 +1180,10 @@ fn sql_type_to_field_type(sql_type: &str) -> FieldType {
     FieldType::BigInt
   } else if upper.contains("INT") {
     FieldType::Int
-  } else if upper.contains("DOUBLE") || upper.contains("REAL") || upper.contains("FLOAT") {
+  } else if upper.contains("DOUBLE")
+    || upper.contains("REAL")
+    || upper.contains("FLOAT")
+  {
     FieldType::Float
   } else if upper.contains("DECIMAL") || upper.contains("NUMERIC") {
     FieldType::Decimal
@@ -1144,7 +1195,10 @@ fn sql_type_to_field_type(sql_type: &str) -> FieldType {
     FieldType::Json
   } else if upper.contains("DATE") || upper.contains("TIME") {
     FieldType::DateTime
-  } else if upper.contains("BLOB") || upper.contains("BYTEA") || upper.contains("BINARY") {
+  } else if upper.contains("BLOB")
+    || upper.contains("BYTEA")
+    || upper.contains("BINARY")
+  {
     FieldType::Bytes
   } else {
     FieldType::String
@@ -1155,7 +1209,10 @@ fn sqlite_type_to_field_type(sql_type: &str) -> FieldType {
   let upper = sql_type.trim().to_uppercase();
   if upper.contains("INT") {
     FieldType::Int
-  } else if upper.contains("REAL") || upper.contains("DOUBLE") || upper.contains("FLOAT") {
+  } else if upper.contains("REAL")
+    || upper.contains("DOUBLE")
+    || upper.contains("FLOAT")
+  {
     FieldType::Float
   } else if upper.contains("BOOL") {
     FieldType::Boolean

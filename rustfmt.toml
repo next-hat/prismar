@@ -1,0 +1,14 @@
+max_width = 80
+tab_spaces = 2
+reorder_imports = true
+reorder_modules = true
+###
+#  UNSTABLE FEATURE
+#  DISABLED FOR CI FMT
+###
+# indent_style = "Block"
+# force_multiline_blocks = true
+# brace_style = "PreferSameLine"
+# control_brace_style = "AlwaysSameLine"
+# imports_granularity = "Crate"
+# blank_lines_upper_bound = 0

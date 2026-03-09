@@ -13,7 +13,9 @@ pub fn derive_prismar_model(input: TokenStream) -> TokenStream {
     .into()
 }
 
-fn expand_prismar_model(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+fn expand_prismar_model(
+  input: DeriveInput,
+) -> syn::Result<proc_macro2::TokenStream> {
   let model_name = input.ident;
   let fields = match input.data {
     Data::Struct(data) => match data.fields {
@@ -355,8 +357,8 @@ fn classify_field(field: &Field) -> syn::Result<ClassifiedField> {
   } else if is_type_named(
     ty,
     &[
-      "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32",
-      "u64", "u128", "usize", "f32", "f64",
+      "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64",
+      "u128", "usize", "f32", "f64",
     ],
   ) {
     FilterKind::Number

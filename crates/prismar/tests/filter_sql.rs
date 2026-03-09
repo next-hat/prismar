@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
 use prismar::{
-  DateTimeFilter, FieldFilter, JsonFilter, ModelFilter, NumberFilter, SqlBackend,
-  StringFilter,
+  DateTimeFilter, FieldFilter, JsonFilter, ModelFilter, NumberFilter,
+  SqlBackend, StringFilter,
 };
 
 #[test]
@@ -12,9 +12,18 @@ fn renders_prisma_like_sql_for_postgres() {
     .unwrap();
 
   let filter = ModelFilter::empty()
-    .predicate("name", FieldFilter::String(StringFilter::Contains("api".into())))
-    .predicate("created_at", FieldFilter::DateTime(DateTimeFilter::GreaterThanOrEquals(created_at)))
-    .predicate("replicas", FieldFilter::Number(NumberFilter::GreaterThan(2.0)))
+    .predicate(
+      "name",
+      FieldFilter::String(StringFilter::Contains("api".into())),
+    )
+    .predicate(
+      "created_at",
+      FieldFilter::DateTime(DateTimeFilter::GreaterThanOrEquals(created_at)),
+    )
+    .predicate(
+      "replicas",
+      FieldFilter::Number(NumberFilter::GreaterThan(2.0)),
+    )
     .predicate(
       "data",
       FieldFilter::Json(JsonFilter::PathEquals {
@@ -69,7 +78,11 @@ fn renders_json_path_like_and_not_like() {
   assert!(pg.sql.contains("NOT LIKE"));
 
   let sqlite = filter.render(SqlBackend::Sqlite);
-  assert!(sqlite.sql.contains("JSON_UNQUOTE(JSON_EXTRACT(data, ?)) LIKE ?"));
+  assert!(
+    sqlite
+      .sql
+      .contains("JSON_UNQUOTE(JSON_EXTRACT(data, ?)) LIKE ?")
+  );
   assert!(
     sqlite
       .sql
@@ -77,7 +90,11 @@ fn renders_json_path_like_and_not_like() {
   );
 
   let mysql = filter.render(SqlBackend::MySql);
-  assert!(mysql.sql.contains("JSON_UNQUOTE(JSON_EXTRACT(data, ?)) LIKE ?"));
+  assert!(
+    mysql
+      .sql
+      .contains("JSON_UNQUOTE(JSON_EXTRACT(data, ?)) LIKE ?")
+  );
   assert!(
     mysql
       .sql
@@ -87,8 +104,10 @@ fn renders_json_path_like_and_not_like() {
 
 #[test]
 fn backend_placeholder_styles_are_respected() {
-  let filter = ModelFilter::empty()
-    .predicate("name", FieldFilter::String(StringFilter::Equals("api".into())));
+  let filter = ModelFilter::empty().predicate(
+    "name",
+    FieldFilter::String(StringFilter::Equals("api".into())),
+  );
 
   let pg = filter.render(SqlBackend::Postgres);
   assert!(pg.sql.contains("$1"));
