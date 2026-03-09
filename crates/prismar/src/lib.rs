@@ -1332,7 +1332,11 @@ pub trait PrismaModel: Sized + Send + 'static {
 
   fn id_from_create(data: &Self::Create) -> Option<Self::Id>;
 
-  fn matches_filter(&self, filter: &ModelFilter) -> Result<bool, RuntimeError>;
+  async fn matches_filter(
+    &self,
+    client: &PrismaClient,
+    filter: &ModelFilter,
+  ) -> Result<bool, RuntimeError>;
 
   async fn create(
     client: &PrismaClient,

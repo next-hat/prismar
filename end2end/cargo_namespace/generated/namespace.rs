@@ -1,4 +1,7 @@
+use prismar::PrismaModel;
 use prismar::diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SelectableHelper};
+
+use super::CargoDb;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, prismar::PrismarModel, prismar::diesel::Queryable, prismar::diesel::Selectable, prismar::diesel::Insertable, prismar::diesel::Identifiable, utoipa::ToSchema)]
 #[diesel(table_name = super::schema::namespaces)]
@@ -19,6 +22,38 @@ pub struct NamespaceUpdate;
 
 #[allow(dead_code)]
 pub type NamespaceCreate = NamespacePartial;
+
+impl NamespaceDb {
+  pub async fn cargos(&self, client: &prismar::PrismaClient, filter: Option<prismar::ModelFilter>) -> Result<Vec<CargoDb>, prismar::RuntimeError> {
+    let related = std::boxed::Box::pin(CargoDb::find_many(client, filter)).await?;
+    let mut matches = Vec::new();
+    for row in related {
+      if row.namespace_name == self.name {
+        matches.push(row);
+      }
+    }
+    Ok(matches)
+  }
+
+}
+
+impl NamespaceDbFilter {
+  pub fn cargos_some<T: prismar::TypedFilter>(mut self, filter: T) -> Self {
+    self.inner = self.inner.relation("cargos", prismar::RelationFilterOp::Some, filter.into_model_filter());
+    self
+  }
+
+  pub fn cargos_every<T: prismar::TypedFilter>(mut self, filter: T) -> Self {
+    self.inner = self.inner.relation("cargos", prismar::RelationFilterOp::Every, filter.into_model_filter());
+    self
+  }
+
+  pub fn cargos_none<T: prismar::TypedFilter>(mut self, filter: T) -> Self {
+    self.inner = self.inner.relation("cargos", prismar::RelationFilterOp::None, filter.into_model_filter());
+    self
+  }
+
+}
 
 impl prismar::PrismaCreateData for NamespaceCreate {
   type Model = NamespaceDb;
@@ -64,7 +99,7 @@ impl prismar::PrismaModel for NamespaceDb {
     data.name.clone()
   }
 
-  fn matches_filter(&self, filter: &prismar::ModelFilter) -> Result<bool, prismar::RuntimeError> {
+  async fn matches_filter(&self, client: &prismar::PrismaClient, filter: &prismar::ModelFilter) -> Result<bool, prismar::RuntimeError> {
     for condition in &filter.conditions {
       let matched = match condition {
         prismar::Condition::Predicate(predicate) => match predicate.field.as_str() {
@@ -74,7 +109,7 @@ impl prismar::PrismaModel for NamespaceDb {
         prismar::Condition::And(filters) => {
           let mut all_match = true;
           for inner in filters {
-            if !self.matches_filter(inner)? {
+            if !std::boxed::Box::pin(self.matches_filter(client, inner)).await? {
               all_match = false;
               break;
             }
@@ -84,17 +119,53 @@ impl prismar::PrismaModel for NamespaceDb {
         prismar::Condition::Or(filters) => {
           let mut any_match = false;
           for inner in filters {
-            if self.matches_filter(inner)? {
+            if std::boxed::Box::pin(self.matches_filter(client, inner)).await? {
               any_match = true;
               break;
             }
           }
           any_match
         }
-        prismar::Condition::Not(inner) => !self.matches_filter(inner)?,
-        prismar::Condition::Relation(_) => {
-          return Err(prismar::RuntimeError::InvalidFilter("relation filters are not executable yet".to_owned()));
-        }
+        prismar::Condition::Not(inner) => !std::boxed::Box::pin(self.matches_filter(client, inner)).await?,
+        prismar::Condition::Relation(relation) => match relation.field.as_str() {
+          "cargos" => {
+            let related = std::boxed::Box::pin(self.cargos(client, None)).await?;
+            match relation.op {
+              prismar::RelationFilterOp::Some => {
+                let mut matched = false;
+                for related in related {
+                  if std::boxed::Box::pin(related.matches_filter(client, &relation.filter)).await? {
+                    matched = true;
+                    break;
+                  }
+                }
+                Ok(matched)
+              }
+              prismar::RelationFilterOp::Every => {
+                let mut matched = true;
+                for related in related {
+                  if !std::boxed::Box::pin(related.matches_filter(client, &relation.filter)).await? {
+                    matched = false;
+                    break;
+                  }
+                }
+                Ok(matched)
+              }
+              prismar::RelationFilterOp::None => {
+                let mut matched = true;
+                for related in related {
+                  if std::boxed::Box::pin(related.matches_filter(client, &relation.filter)).await? {
+                    matched = false;
+                    break;
+                  }
+                }
+                Ok(matched)
+              }
+              prismar::RelationFilterOp::Is | prismar::RelationFilterOp::IsNot => Err(prismar::RuntimeError::InvalidFilter(format!("relation 'cargos' is to-many; use some/every/none"))),
+            }
+          },
+          unknown => Err(prismar::RuntimeError::InvalidFilter(format!("unknown relation '{}'", unknown))),
+        }?,
       };
       if !matched {
         return Ok(false);
@@ -150,7 +221,7 @@ match client.provider() {
     if let Some(filter) = filter {
       let mut filtered = Vec::new();
       for row in rows.drain(..) {
-        if row.matches_filter(&filter)? {
+        if row.matches_filter(client, &filter).await? {
           filtered.push(row);
         }
       }

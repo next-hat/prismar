@@ -298,6 +298,37 @@ let filtered = client
   .await?;
 ```
 
+### Relation filters
+
+```rust
+use generated::{CargoDbFilter, NamespaceDbFilter};
+
+let cargos_in_system = client
+  .find_many::<CargoDb>(Some(
+    CargoDbFilter::new()
+      .namespace_is(
+        NamespaceDbFilter::new().name(StringFilter::Equals("system".to_owned())),
+      )
+      .into(),
+  ))
+  .await?;
+
+let namespaces_with_api = client
+  .find_many::<NamespaceDb>(Some(
+    NamespaceDbFilter::new()
+      .cargos_some(
+        CargoDbFilter::new().name(StringFilter::Equals("api".to_owned())),
+      )
+      .into(),
+  ))
+  .await?;
+```
+
+Generated relation filter helpers follow Prisma naming:
+
+- to-one relations: `_is`, `_is_not`
+- to-many relations: `_some`, `_every`, `_none`
+
 ### Find unique
 
 ```rust
@@ -374,6 +405,79 @@ let batch = client
   .await?;
 
 assert_eq!(batch.count, 2);
+```
+
+### Add cargoes inside a namespace
+
+Nested writes are not automatic yet. The current pattern is:
+
+1. create the parent
+2. create the related rows with the foreign key filled in
+3. optionally materialize a custom struct for the nested shape you want
+
+```rust
+#[derive(Debug)]
+struct NamespaceWithCargoes {
+  namespace: NamespaceDb,
+  cargoes: Vec<CargoDb>,
+}
+
+let namespace = client
+  .create(NamespaceCreate {
+    name: Some("system".to_owned()),
+  })
+  .await?;
+
+client
+  .create_many(
+    vec![
+      CargoCreate {
+        key: Some("cargo.system.api".to_owned()),
+        created_at: Some(chrono::Utc::now().naive_utc()),
+        name: Some("api".to_owned()),
+        spec_key: None,
+        status_key: Some("running".to_owned()),
+        namespace_name: Some(namespace.name.clone()),
+      },
+      CargoCreate {
+        key: Some("cargo.system.worker".to_owned()),
+        created_at: Some(chrono::Utc::now().naive_utc()),
+        name: Some("worker".to_owned()),
+        spec_key: None,
+        status_key: Some("running".to_owned()),
+        namespace_name: Some(namespace.name.clone()),
+      },
+    ],
+    None,
+  )
+  .await?;
+
+let nested = NamespaceWithCargoes {
+  cargoes: namespace.cargos(&client, None).await?,
+  namespace,
+};
+```
+
+### Add a namespace inside a cargo view
+
+```rust
+#[derive(Debug)]
+struct CargoWithNamespace {
+  cargo: CargoDb,
+  namespace: Option<NamespaceDb>,
+}
+
+let cargo = client
+  .find_unique::<CargoDb, _>(
+    CargoDbFilter::new().key(StringFilter::Equals("cargo.system.api".to_owned())),
+  )
+  .await?
+  .expect("cargo should exist");
+
+let nested = CargoWithNamespace {
+  namespace: cargo.namespace(&client).await?,
+  cargo,
+};
 ```
 
 ### Update by id
@@ -534,7 +638,8 @@ Additional convenience helpers remain available:
 Current implementation notes:
 
 - scalar filters execute against loaded model rows, so Prisma-style field operators such as `contains`, `startsWith`, `gt`, `in`, `AND`, `OR`, and `NOT` work through the generated model layer
-- relation filter parsing exists, but relation-filter execution is not wired yet
+- relation filters execute for generated to-one and to-many relations
+- nested writes are still explicit: create the related rows separately, then load them through generated relation helpers or a custom wrapper struct
 - `create()` reloads the created row via the generated primary key, so the primary key must be present or client-generated in the create payload
 
 ## Runtime helpers

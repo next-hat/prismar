@@ -1,3 +1,4 @@
+use prismar::PrismaModel;
 use prismar::diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SelectableHelper};
 
 use super::NamespaceDb;
@@ -39,6 +40,32 @@ pub struct CargoUpdate {
 
 #[allow(dead_code)]
 pub type CargoCreate = CargoPartial;
+
+impl CargoDb {
+  pub async fn namespace(&self, client: &prismar::PrismaClient) -> Result<Option<NamespaceDb>, prismar::RuntimeError> {
+    let related = std::boxed::Box::pin(NamespaceDb::find_many(client, None)).await?;
+    for row in related {
+      if row.name == self.namespace_name {
+        return Ok(Some(row));
+      }
+    }
+    Ok(None)
+  }
+
+}
+
+impl CargoDbFilter {
+  pub fn namespace_is<T: prismar::TypedFilter>(mut self, filter: T) -> Self {
+    self.inner = self.inner.relation("namespace", prismar::RelationFilterOp::Is, filter.into_model_filter());
+    self
+  }
+
+  pub fn namespace_is_not<T: prismar::TypedFilter>(mut self, filter: T) -> Self {
+    self.inner = self.inner.relation("namespace", prismar::RelationFilterOp::IsNot, filter.into_model_filter());
+    self
+  }
+
+}
 
 impl prismar::PrismaCreateData for CargoCreate {
   type Model = CargoDb;
@@ -86,7 +113,7 @@ impl prismar::PrismaModel for CargoDb {
     data.key.clone()
   }
 
-  fn matches_filter(&self, filter: &prismar::ModelFilter) -> Result<bool, prismar::RuntimeError> {
+  async fn matches_filter(&self, client: &prismar::PrismaClient, filter: &prismar::ModelFilter) -> Result<bool, prismar::RuntimeError> {
     for condition in &filter.conditions {
       let matched = match condition {
         prismar::Condition::Predicate(predicate) => match predicate.field.as_str() {
@@ -101,7 +128,7 @@ impl prismar::PrismaModel for CargoDb {
         prismar::Condition::And(filters) => {
           let mut all_match = true;
           for inner in filters {
-            if !self.matches_filter(inner)? {
+            if !std::boxed::Box::pin(self.matches_filter(client, inner)).await? {
               all_match = false;
               break;
             }
@@ -111,17 +138,30 @@ impl prismar::PrismaModel for CargoDb {
         prismar::Condition::Or(filters) => {
           let mut any_match = false;
           for inner in filters {
-            if self.matches_filter(inner)? {
+            if std::boxed::Box::pin(self.matches_filter(client, inner)).await? {
               any_match = true;
               break;
             }
           }
           any_match
         }
-        prismar::Condition::Not(inner) => !self.matches_filter(inner)?,
-        prismar::Condition::Relation(_) => {
-          return Err(prismar::RuntimeError::InvalidFilter("relation filters are not executable yet".to_owned()));
-        }
+        prismar::Condition::Not(inner) => !std::boxed::Box::pin(self.matches_filter(client, inner)).await?,
+        prismar::Condition::Relation(relation) => match relation.field.as_str() {
+          "namespace" => {
+            let related = std::boxed::Box::pin(self.namespace(client)).await?;
+            match relation.op {
+              prismar::RelationFilterOp::Is | prismar::RelationFilterOp::Some | prismar::RelationFilterOp::Every => match related {
+                Some(related) => std::boxed::Box::pin(related.matches_filter(client, &relation.filter)).await,
+                None => Ok(false),
+              },
+              prismar::RelationFilterOp::IsNot | prismar::RelationFilterOp::None => match related {
+                Some(related) => Ok(!std::boxed::Box::pin(related.matches_filter(client, &relation.filter)).await?),
+                None => Ok(true),
+              },
+            }
+          },
+          unknown => Err(prismar::RuntimeError::InvalidFilter(format!("unknown relation '{}'", unknown))),
+        }?,
       };
       if !matched {
         return Ok(false);
@@ -177,7 +217,7 @@ match client.provider() {
     if let Some(filter) = filter {
       let mut filtered = Vec::new();
       for row in rows.drain(..) {
-        if row.matches_filter(&filter)? {
+        if row.matches_filter(client, &filter).await? {
           filtered.push(row);
         }
       }

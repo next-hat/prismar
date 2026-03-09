@@ -4,13 +4,28 @@ use diesel::{
   connection::SimpleConnection,
   sqlite::SqliteConnection,
 };
-use generated::{CargoCreate, CargoDb, CargoDbFilter, CargoUpdate, NamespaceCreate, NamespaceDb};
+use generated::{
+  CargoCreate, CargoDb, CargoDbFilter, CargoUpdate, NamespaceCreate,
+  NamespaceDb, NamespaceDbFilter,
+};
 use prismar::{PrismaClient, PrismaReadManyInput, Provider, SqlBackend, StringFilter, connection_pool, with_connection};
 
 #[path = "../generated/mod.rs"]
 mod generated;
 
 const FIXTURE_DIR: &str = env!("CARGO_MANIFEST_DIR");
+
+#[derive(Debug)]
+struct NamespaceWithCargoes {
+  namespace: NamespaceDb,
+  cargoes: Vec<CargoDb>,
+}
+
+#[derive(Debug)]
+struct CargoWithNamespace {
+  cargo: CargoDb,
+  namespace: Option<NamespaceDb>,
+}
 
 #[ntex::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -92,14 +107,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   let rendered = filter.render(SqlBackend::Sqlite);
   assert!(rendered.sql.contains("key = ?"));
+  assert!(rendered.sql.contains("EXISTS"));
 
   let cargos = client.find_many::<CargoDb>(None).await?;
   let namespaces = client.find_many::<NamespaceDb>(None).await?;
+  let json_filtered = client.find_many::<CargoDb>(Some(filter)).await?;
   let filtered = client
     .find_many::<CargoDb>(Some(
       CargoDbFilter::new()
         .key(StringFilter::Equals("cargo.system.api".to_owned()))
         .into(),
+    ))
+    .await?;
+  let relation_filtered_cargos = client
+    .find_many::<CargoDb>(Some(
+      CargoDbFilter::new().namespace_is(
+        NamespaceDbFilter::new().name(StringFilter::Equals("system".to_owned())),
+      ).into(),
+    ))
+    .await?;
+  let relation_filtered_namespaces = client
+    .find_many::<NamespaceDb>(Some(
+      NamespaceDbFilter::new().cargos_some(
+        CargoDbFilter::new().name(StringFilter::Equals("api".to_owned())),
+      ).into(),
     ))
     .await?;
   let unique = client
@@ -122,13 +153,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .find_by_id::<CargoDb>(&cargo_id)
     .await?
     .ok_or_else(|| std::io::Error::other("cargo not found"))?;
+  let namespace_with_cargoes = NamespaceWithCargoes {
+    namespace: namespace.clone(),
+    cargoes: namespace.cargos(&client, None).await?,
+  };
+  let cargo_with_namespace = CargoWithNamespace {
+    cargo: cargo.clone(),
+    namespace: cargo.namespace(&client).await?,
+  };
 
   assert_eq!(namespaces.len(), 1);
   assert_eq!(cargos.len(), 2);
+  assert_eq!(json_filtered.len(), 2);
   assert_eq!(filtered.len(), 1);
+  assert_eq!(relation_filtered_cargos.len(), 2);
+  assert_eq!(relation_filtered_namespaces.len(), 1);
   assert_eq!(total, 2);
   assert_eq!(unique.key, "cargo.system.api");
   assert_eq!(first.status_key, "running");
+  assert_eq!(namespace_with_cargoes.namespace.name, "system");
+  assert_eq!(namespace_with_cargoes.cargoes.len(), 2);
+  assert_eq!(cargo_with_namespace.cargo.key, "cargo.system.api");
+  assert_eq!(cargo_with_namespace.namespace.as_ref().map(|item| item.name.as_str()), Some("system"));
   assert_eq!(cargo.namespace_name, "system");
   assert_eq!(cargo.name, "api");
   assert!(!cargo.spec_key.is_empty());
